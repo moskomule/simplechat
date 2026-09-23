@@ -229,6 +229,8 @@ promptInput.addEventListener("keydown", (event) => {
 
 promptForm.addEventListener("htmx:beforeRequest", () => {
   sentPrompt = promptInput.value;
+  // Disabling a focused button drops focus to <body>, so go back to the text first.
+  if (document.activeElement === promptSave) promptInput.focus();
   promptSave.disabled = true; // no double saves; typing re-enables it
 });
 
