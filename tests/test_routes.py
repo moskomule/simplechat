@@ -1,7 +1,7 @@
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -12,6 +12,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from simplechat.config import Settings
 from simplechat.generation import build_chat_messages
 from simplechat.llm import (
+    ChatStream,
     ChunkKind,
     LoadedModel,
     ModelInfo,
@@ -46,6 +47,9 @@ class FakeBackend:
         self.fail = fail
         # Set to False to hold replies in the "streaming" state until set back to True.
         self.released = True
+        # After this many chunks, hang like a model still generating; only a stop ends it.
+        self.stall_after: int | None = None
+        self.stream_closed = False
         self.calls: list[tuple[str, list[ChatCompletionMessageParam], str]] = []
         # Models "in memory" for unload_models. Busy ones (answering another client)
         # stay loaded; set unload_fails to simulate Ollama being down.
@@ -75,14 +79,19 @@ class FakeBackend:
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
-    ) -> AsyncIterator[tuple[ChunkKind, str]]:
+    ) -> ChatStream:
         self.calls.append((model, messages, thinking))
         if self.fail:
             raise APIConnectionError(request=None)  # type: ignore[arg-type]
-        while not self.released:
-            await asyncio.sleep(0.005)
-        for chunk in self.chunks:
-            yield chunk
+        try:
+            while not self.released:
+                await asyncio.sleep(0.005)
+            for count, chunk in enumerate(self.chunks):
+                if count == self.stall_after:
+                    await asyncio.Event().wait()
+                yield chunk
+        finally:
+            self.stream_closed = True
 
 
 @pytest.fixture
@@ -112,6 +121,13 @@ def conversation(client: TestClient, store: Store) -> Conversation:
 def stream(client: TestClient, conversation: Conversation, message_id: str) -> str:
     """Wait for a reply to finish and return its SSE stream."""
     return client.get(f"/c/{conversation.id}/stream/{message_id}").text
+
+
+def wait_until(condition: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + 5
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.01)
 
 
 def concurrently[T](backend: FakeBackend, *calls: Callable[[], T]) -> list[T]:
@@ -336,6 +352,52 @@ def test_busy_reply_renders_empty(
     backend.released = True
     assert "partial" not in page.text
     assert 'sse-connect="/c/' in page.text
+
+
+def test_stop_keeps_the_reply_so_far(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.stall_after = 1  # "Hello", then the model keeps going until stopped
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    reply = conversation.active_path()[1]
+    wait_until(lambda: reply.content == "Hello")
+
+    assert client.post(f"/c/{conversation.id}/stop").status_code == 204
+    body = stream(client, conversation, reply.id)
+    assert reply.status == "done"
+    assert reply.content == "Hello"
+    # Closing the model's stream is what makes Ollama stop generating.
+    assert backend.stream_closed
+    # Followers get the stopped reply as a normal finished message.
+    done = body.split("event: done", 1)[1]
+    assert 'class="msg assistant done"' in done
+    assert 'aria-label="Regenerate"' in done
+
+    backend.stall_after = None
+    assert (
+        client.post(f"/c/{conversation.id}/messages", data={"content": "Next"}).status_code == 200
+    )
+
+
+def test_stop_with_nothing_running(client: TestClient, conversation: Conversation) -> None:
+    assert client.post(f"/c/{conversation.id}/stop").status_code == 204
+
+
+def test_page_has_hidden_stop_button(client: TestClient, conversation: Conversation) -> None:
+    page = client.get(f"/c/{conversation.id}").text
+    button = re.search(r'<button class="stop"[^>]*>', page)
+    assert button is not None
+    assert "hidden" in button[0]
+    assert f'hx-post="/c/{conversation.id}/stop"' in button[0]
+    # It sits in the composer form, whose message and images must not be posted.
+    assert 'hx-params="none"' in button[0]
+
+    composer = re.search(r'<form class="composer"[^>]*>', page)
+    assert composer is not None
+    # Stop must not inherit the form's htmx attributes (e.g. hx-disabled-elt), and its
+    # request, which bubbles up to the form, must not reset a draft typed meanwhile.
+    assert 'hx-disinherit="*"' in composer[0]
+    assert "event.detail.elt === this" in composer[0]
 
 
 def test_empty_message_is_rejected(client: TestClient, conversation: Conversation) -> None:

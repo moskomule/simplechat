@@ -2,7 +2,7 @@
 
 A minimal ChatGPT-style chat UI for [Ollama](https://ollama.com), built with FastAPI and htmx.
 
-- Streaming replies (Server-Sent Events)
+- Streaming replies (Server-Sent Events), with a Stop button that ends a reply early and keeps what was written so far
 - Edit your messages and regenerate replies; every version is kept and you can switch between them with ‹ 1/2 ›
 - Model picker and a system prompt for each conversation; the system prompt is saved with its Save button (or Ctrl/Cmd+Enter)
 - Thinking level for models that can think (e.g. off, low, medium, high), with the model's thoughts shown in a collapsible section

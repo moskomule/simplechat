@@ -550,7 +550,7 @@ button:disabled {
 }
 
 /* app.js makes these inert while a reply is being generated. */
-:is(.actions, .send, .free-memory)[inert] {
+:is(.actions, .free-memory)[inert] {
   opacity: 0.4;
 }
 
@@ -610,6 +610,25 @@ button:disabled {
   background: var(--accent);
   color: var(--accent-fg);
   font-size: 20px;
+}
+
+/* Shown instead of Send while a reply is generated. No `display` here, so the
+   `hidden` attribute app.js toggles keeps working; buttons center their content. */
+.stop {
+  flex: 0 0 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--fg);
+}
+
+.stop-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+  border-radius: 3px;
+  background: var(--bg);
 }
 
 /* --- small screens: the sidebar becomes a drawer --- */

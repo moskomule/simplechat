@@ -8,6 +8,7 @@ keep receiving chunks until the reply finishes.
 import asyncio
 import base64
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from openai import OpenAIError
 from openai.types.chat import ChatCompletionContentPartParam, ChatCompletionMessageParam
@@ -75,6 +76,21 @@ class Generations:
         self._running[reply.id] = generation
         # Keep a reference to the task; the event loop only holds a weak one.
         generation.task = asyncio.create_task(self._run(backend, conversation, reply, generation))
+        # Runs however the task ends, even if it is stopped before it gets to run,
+        # when `_run` never starts and so could not clean up after itself.
+        generation.task.add_done_callback(lambda _: self._finish(reply, generation))
+
+    def stop(self, message_id: str) -> None:
+        """Stop generating a reply, keeping what was generated so far."""
+        if (generation := self._running.get(message_id)) and generation.task:
+            generation.task.cancel()
+
+    def _finish(self, reply: Message, generation: Generation) -> None:
+        # Stopped, or cancelled at shutdown: keep what was generated so far.
+        if reply.is_busy:
+            reply.status = "done"
+        del self._running[reply.id]
+        generation.finish()
 
     async def _run(
         self,
@@ -83,6 +99,7 @@ class Generations:
         reply: Message,
         generation: Generation,
     ) -> None:
+        """Generate the reply; `_finish` cleans up however this ends."""
         reply.status = "streaming"
         try:
             if not conversation.model:
@@ -92,22 +109,19 @@ class Generations:
                 build_chat_messages(conversation, reply),
                 thinking=conversation.thinking,
             )
-            async for kind, text in chunks:
-                if kind == "thinking":
-                    reply.thinking += text
-                else:
-                    reply.content += text
-                generation.add(kind, text)
+            # aclosing: a stopped reply closes the stream, and with it the
+            # connection, so Ollama stops generating too.
+            async with aclosing(chunks):
+                async for kind, text in chunks:
+                    if kind == "thinking":
+                        reply.thinking += text
+                    else:
+                        reply.content += text
+                    generation.add(kind, text)
             reply.status = "done"
         except (OpenAIError, ValueError) as e:
             reply.status = "error"
             reply.error = str(e)
-        finally:
-            # Cancelled (e.g. at shutdown): keep what was generated so far.
-            if reply.status == "streaming":
-                reply.status = "done"
-            del self._running[reply.id]
-            generation.finish()
 
 
 def build_chat_messages(

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 
 import httpx2
 import pytest
@@ -85,7 +85,7 @@ def test_empty_model_info_when_ollama_errors() -> None:
     assert asyncio.run(backend.model_info("m")) == ModelInfo()
 
 
-def sse(*deltas: dict[str, str]) -> bytes:
+def sse(*deltas: dict[str, str], done: bool = True) -> bytes:
     events = [
         "data: "
         + json.dumps(
@@ -99,7 +99,9 @@ def sse(*deltas: dict[str, str]) -> bytes:
         )
         for delta in deltas
     ]
-    return ("\n\n".join([*events, "data: [DONE]"]) + "\n\n").encode()
+    if done:
+        events.append("data: [DONE]")
+    return ("\n\n".join(events) + "\n\n").encode()
 
 
 def test_stream_chat_splits_thinking_and_content() -> None:
@@ -142,6 +144,42 @@ def test_stream_chat_default_thinking_sends_no_effort() -> None:
 
     assert asyncio.run(collect()) == [("content", "hi")]
     assert "reasoning_effort" not in requests[0]
+
+
+class EndlessStream(httpx2.AsyncByteStream):
+    """A response body that sends its events, then hangs like a model still generating."""
+
+    def __init__(self, *events: bytes) -> None:
+        self.events = events
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for event in self.events:
+            yield event
+        await asyncio.Event().wait()  # never set: the reply goes on
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_stopping_a_stream_closes_the_connection() -> None:
+    # Closing the response is what tells Ollama to stop generating.
+    body = EndlessStream(sse({"content": "one"}, done=False))
+    backend = backend_with(
+        lambda request: httpx2.Response(
+            200, stream=body, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    async def read_one_then_stop() -> tuple[tuple[str, str], bool]:
+        chunks = backend.stream_chat("m", [])
+        first = await anext(chunks)
+        await chunks.aclose()
+        # Checked here, not after asyncio.run(): its shutdown closes leftover
+        # generators anyway, which would hide a connection left open.
+        return first, body.closed
+
+    assert asyncio.run(read_one_then_stop()) == (("content", "one"), True)
 
 
 def ollama_with_loaded_models(
