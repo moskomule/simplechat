@@ -1,3 +1,6 @@
+"""A ChatGPT-style chat UI for Ollama."""
+
+import argparse
 import socket
 from collections.abc import AsyncIterator
 from html import escape
@@ -303,15 +306,31 @@ def lan_address() -> str | None:
             return None
 
 
-def run() -> None:
-    settings = Settings.from_env()
-    print(f"SimpleChat: http://localhost:{settings.port}", flush=True)
-    if settings.host == "0.0.0.0" and (address := lan_address()):
-        print(f"On your local network: http://{address}:{settings.port}", flush=True)
+def parse_args(settings: Settings, argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="simplechat", description=__doc__)
+    parser.add_argument(
+        "--host",
+        default=settings.host,
+        help="address to bind; 127.0.0.1 keeps it local (default: $HOST or %(default)s)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=settings.port,
+        help="port to listen on (default: $PORT or %(default)s)",
+    )
+    return parser.parse_args(argv)
+
+
+def run(argv: list[str] | None = None) -> None:
+    args = parse_args(Settings.from_env(), argv)
+    print(f"SimpleChat: http://localhost:{args.port}", flush=True)
+    if args.host == "0.0.0.0" and (address := lan_address()):
+        print(f"On your local network: http://{address}:{args.port}", flush=True)
     # A single worker: conversations live in this process's memory.
     uvicorn.run(
         "simplechat.main:create_app",
         factory=True,
-        host=settings.host,
-        port=settings.port,
+        host=args.host,
+        port=args.port,
     )

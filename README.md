@@ -32,6 +32,13 @@ Ollama itself can stay bound to localhost, because only the server talks to it.
 
 Enter sends a message and Shift+Enter adds a new line. On touch devices, Enter adds a new line and you send with the button.
 
+To use another port or address, pass flags, which take precedence over the environment variables below:
+
+```sh
+uv run simplechat --port 8080
+uv run simplechat --host 127.0.0.1   # only this machine
+```
+
 ### Configuration
 
 Environment variables:
