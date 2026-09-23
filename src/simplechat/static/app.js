@@ -3,6 +3,8 @@
 const scroller = document.getElementById("scroller");
 const composer = document.getElementById("composer");
 const input = composer.querySelector("textarea");
+const sendButton = composer.querySelector(".send");
+const stopButton = composer.querySelector(".stop");
 const isTouch = window.matchMedia("(pointer: coarse)").matches;
 
 // --- keep the thread scrolled to the bottom unless the user scrolled up ---
@@ -53,8 +55,20 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-composer.addEventListener("htmx:beforeRequest", () => {
+// Set when Send had keyboard focus as a message went out; syncBusyState then moves
+// focus to Stop. It can't tell by itself: hx-disabled-elt disables Send during the
+// request, and the browser drops focus from a disabled button.
+let sendHadFocus = false;
+
+composer.addEventListener("htmx:beforeRequest", (event) => {
   stickToBottom = true;
+  // Stop's own request bubbles up here too.
+  if (event.detail.elt === composer) sendHadFocus = document.activeElement === sendButton;
+});
+
+// A failed send starts no reply, so there is no Stop to move focus to.
+composer.addEventListener("htmx:afterRequest", (event) => {
+  if (event.detail.elt === composer && !event.detail.successful) sendHadFocus = false;
 });
 
 composer.addEventListener("reset", () => {
@@ -179,9 +193,17 @@ function isBusy() {
 
 function syncBusyState() {
   const busy = isBusy();
-  document.querySelectorAll(".msg .actions, .composer .send, .free-memory").forEach((element) => {
+  document.querySelectorAll(".msg .actions, .free-memory").forEach((element) => {
     element.inert = busy;
   });
+  // While a reply is generated, Stop takes Send's place. If the button being
+  // hidden has keyboard focus, hand it to the one that replaces it.
+  const focused = document.activeElement;
+  sendButton.hidden = busy;
+  stopButton.hidden = !busy;
+  if (busy && (focused === sendButton || sendHadFocus)) stopButton.focus();
+  if (!busy && focused === stopButton) sendButton.focus();
+  if (busy) sendHadFocus = false;
 }
 
 // Fires after every swap, including new turns, thread redraws and the final

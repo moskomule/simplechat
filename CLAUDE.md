@@ -27,7 +27,7 @@ Conversations are in-memory `Conversation` objects, so everything is lost on res
 - A message's `children` are alternative versions of the next turn. `active_child` selects which one is shown. Following `active_child` from the root gives `active_path()`, which is what the UI renders.
 - Editing a user message adds a sibling user message plus a new `pending` assistant reply. Regenerating adds a sibling assistant message. Nothing is overwritten, and `switch()` moves between siblings.
 - The prompt for a reply is `ancestors(reply_id)`: its branch, not the active path.
-- Every mutation raises `BusyError` while any message is `pending` or `streaming`. Routes turn that into a 409, and `app.js` makes the action and send buttons `inert` (blocking keyboard as well as pointer).
+- Every mutation raises `BusyError` while any message is `pending` or `streaming`. Routes turn that into a 409, and `app.js` makes the action buttons `inert` (blocking keyboard as well as pointer) and shows the Stop button in place of Send.
 - The store is not thread-safe. **Every route and store-reading dependency is `async def`**, so it runs on the event loop and a busy check and the mutation after it can't interleave. Don't add `await` between them, and don't add plain `def` routes, which FastAPI would run in a thread pool.
 
 ### Streaming lifecycle (`generation.py`, `main.py`, `partials/message.html`)
@@ -37,6 +37,7 @@ Conversations are in-memory `Conversation` objects, so everything is lost on res
 3. `GET /c/{cid}/stream/{mid}` follows the running `Generation`: it replays all chunks from the start, then yields new ones as `thinking` and `content` events with HTML-escaped text. `sse-swap` appends them with `beforeend`. Any number of clients (a reconnect, a reload, a second device) can follow the same generation, and the model is called only once.
 4. Only after the generation finishes does the stream send `done`, whose data is the whole re-rendered, finished message. The article is replaced via `sse-swap="done" hx-swap="outerHTML"`, and `sse-close="done"` stops the stream. A reply that already finished gets `done` right away. `done` must never carry a busy message, or the client would reconnect in a loop.
 5. The stream endpoint must always answer 200 and end with `done`. The htmx SSE extension retries forever on error responses.
+6. **Stop** (`POST /c/{cid}/stop` → `Generations.stop()`) cancels the task and keeps the text so far. Cleanup (status, `_running`, `finish()`) lives in the task's done-callback `_finish`, not in a `finally`: a task stopped before it starts never runs its body. Cancelling only stops Ollama if the HTTP stream is closed, so `stream_chat` closes it with `async with stream` and `_run` wraps the chunks in `aclosing()`.
 
 In tests, the `client` fixture keeps one `TestClient` context (and so one event loop) open across requests, so background generations survive between requests. To check streamed chunks, hold the reply with `FakeBackend.released = False` and use `concurrently()`.
 

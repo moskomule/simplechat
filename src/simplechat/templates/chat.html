@@ -63,17 +63,24 @@
         </div>
       </div>
 
+      {# hx-disinherit: the Stop button inside must not pick up these attributes.
+         The reset checks the request's element because Stop's request bubbles up here
+         too, and must not clear a draft typed while the reply streams. #}
       <form class="composer" id="composer"
             hx-post="/c/{{ conversation.id }}/messages"
             hx-target="#thread" hx-swap="beforeend" hx-encoding="multipart/form-data"
-            hx-disabled-elt="find .send"
-            hx-on::after-request="if (event.detail.successful) this.reset()">
+            hx-disabled-elt="find .send" hx-disinherit="*"
+            hx-on::after-request="if (event.detail.successful && event.detail.elt === this) this.reset()">
         {# Previews of the selected images, drawn by app.js. #}
         <div class="attachments" id="attachments"></div>
         {% include "partials/attach_button.html" %}
         <input type="file" id="attach-input" name="images" accept="image/*" multiple hidden>
         <textarea name="content" rows="1" placeholder="Message" aria-label="Message" required></textarea>
         <button class="send" type="submit" aria-label="Send">↑</button>
+        {# Takes Send's place while a reply is generated (app.js). hx-params="none":
+           the message and images in this form are not sent along. #}
+        <button class="stop" type="button" aria-label="Stop generating" title="Stop generating" hidden
+                hx-post="/c/{{ conversation.id }}/stop" hx-params="none" hx-swap="none"><span class="stop-icon"></span></button>
       </form>
     </main>
   </div>

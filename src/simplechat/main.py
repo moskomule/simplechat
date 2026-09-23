@@ -383,6 +383,18 @@ async def regenerate_message(
     return render_thread(request, conversation)
 
 
+@router.post("/c/{cid}/stop", status_code=204)
+async def stop_reply(conversation: ConversationDep, generations: GenerationsDep) -> None:
+    """Stop the reply being generated in this conversation, keeping its text so far.
+
+    Nothing is returned: the reply's stream then sends `done` with the stopped
+    message, like any finished reply.
+    """
+    for message in conversation.messages.values():
+        if message.is_busy:
+            generations.stop(message.id)
+
+
 @router.post("/c/{cid}/messages/{mid}/switch", response_class=HTMLResponse)
 async def switch_version(
     request: Request,
