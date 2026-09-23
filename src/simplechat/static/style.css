@@ -10,6 +10,8 @@
   --danger: #dc2626;
   --radius: 18px;
   --content-width: 48rem;
+  /* How long the sidebar takes to slide in or out. */
+  --slide: 0.2s;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -317,12 +319,14 @@ button:disabled {
 /* On wide screens the sidebar collapses; on small ones it is a drawer (below). */
 @media (min-width: 768px) {
   .sidebar {
-    transition: margin-left 0.2s ease, visibility 0.2s;
+    transition: margin-left var(--slide) ease;
   }
 
   .sidebar-collapsed .sidebar {
     margin-left: -260px;
     visibility: hidden;
+    /* Hide only after sliding out; it shows at once when opened, so it can take focus. */
+    transition: margin-left var(--slide) ease, visibility 0s var(--slide);
   }
 
   .sidebar-collapsed .topbar .sidebar-opener,
@@ -592,12 +596,13 @@ button:disabled {
     width: min(80vw, 300px);
     transform: translateX(-100%);
     visibility: hidden;
-    transition: transform 0.2s ease, visibility 0.2s;
+    transition: transform var(--slide) ease, visibility 0s var(--slide);
   }
 
   .sidebar-open .sidebar {
     transform: none;
     visibility: visible;
+    transition: transform var(--slide) ease;
   }
 
   .sidebar-open .backdrop {
@@ -614,7 +619,7 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar {
-    transition: none;
+  :root {
+    --slide: 0s;
   }
 }
