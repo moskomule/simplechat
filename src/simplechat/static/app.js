@@ -189,6 +189,70 @@ function syncBusyState() {
 document.body.addEventListener("htmx:afterSettle", syncBusyState);
 syncBusyState();
 
+// --- system prompt: saved only with the Save button or Ctrl/Cmd+Enter ---
+
+// The textarea's defaultValue (its server-rendered text) is the saved prompt, so
+// "unsaved" means the value differs from it. The textarea is never swapped out,
+// which keeps the panel open and the cursor in place.
+
+const promptForm = document.getElementById("system-prompt-form");
+const promptInput = promptForm.querySelector("textarea");
+const promptSave = promptForm.querySelector("button[type=submit]");
+const promptStatus = promptForm.querySelector(".save-status");
+const promptUnsavedMark = document.querySelector(".system-prompt .unsaved-mark");
+// One save at a time: while one is in flight, Save stays disabled even if the user
+// keeps typing, so `sentPrompt` always belongs to the request that is answering.
+let saving = false;
+let sentPrompt = "";
+let promptStatusTimer;
+
+function showPromptStatus(text, clearAfterMs = 0) {
+  clearTimeout(promptStatusTimer);
+  promptStatus.textContent = text;
+  if (clearAfterMs) promptStatusTimer = setTimeout(() => showPromptStatus(""), clearAfterMs);
+}
+
+function syncPromptState() {
+  const unsaved = promptInput.value !== promptInput.defaultValue;
+  promptSave.disabled = saving || !unsaved;
+  promptUnsavedMark.hidden = !unsaved;
+}
+
+promptInput.addEventListener("input", () => {
+  showPromptStatus("");
+  syncPromptState();
+});
+
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+    event.preventDefault();
+    if (!promptSave.disabled) promptForm.requestSubmit();
+  }
+});
+
+promptForm.addEventListener("htmx:beforeRequest", () => {
+  sentPrompt = promptInput.value;
+  // Disabling a focused button drops focus to <body>, so go back to the text first.
+  if (document.activeElement === promptSave) promptInput.focus();
+  saving = true;
+  syncPromptState();
+});
+
+promptForm.addEventListener("htmx:afterRequest", (event) => {
+  saving = false;
+  if (event.detail.successful) {
+    // The user may have kept typing, so the sent text, not the current one, is saved.
+    promptInput.defaultValue = sentPrompt;
+    if (promptInput.value === sentPrompt) showPromptStatus("Saved", 2000);
+  } else {
+    showPromptStatus("Not saved");
+  }
+  syncPromptState();
+});
+
+// The browser may restore unsaved text on reload.
+syncPromptState();
+
 // --- sidebar drawer on small screens ---
 
 document.querySelectorAll("[data-sidebar-toggle]").forEach((element) => {
