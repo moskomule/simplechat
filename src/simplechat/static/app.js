@@ -43,7 +43,7 @@ input.addEventListener("keydown", (event) => {
   // isComposing: Enter confirms IME input (e.g. Japanese) and must not send.
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !isTouch) {
     event.preventDefault();
-    composer.requestSubmit();
+    if (!isBusy()) composer.requestSubmit();
   }
 });
 
@@ -55,6 +55,27 @@ composer.addEventListener("reset", () => {
   // The value is cleared after this event, so resize on the next frame.
   requestAnimationFrame(resizeInput);
 });
+
+// --- no new requests while a reply is being generated ---
+
+// The server refuses them anyway (409); this keeps the controls from looking or
+// acting usable. `inert` blocks mouse, touch and keyboard, unlike pointer-events.
+
+function isBusy() {
+  return document.querySelector(".msg.pending, .msg.streaming") !== null;
+}
+
+function syncBusyState() {
+  const busy = isBusy();
+  document.querySelectorAll(".msg .actions, .composer .send").forEach((element) => {
+    element.inert = busy;
+  });
+}
+
+// Fires after every swap, including new turns, thread redraws and the final
+// `done` swap that replaces a streamed message.
+document.body.addEventListener("htmx:afterSettle", syncBusyState);
+syncBusyState();
 
 // --- sidebar drawer on small screens ---
 

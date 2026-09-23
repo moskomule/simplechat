@@ -354,10 +354,9 @@ button:disabled {
   gap: 8px;
 }
 
-/* No new requests while a reply is being generated. */
-.chat:has(.msg.pending, .msg.streaming) :is(.actions button, .composer .send) {
+/* app.js makes these inert while a reply is being generated. */
+:is(.actions, .send)[inert] {
   opacity: 0.4;
-  pointer-events: none;
 }
 
 /* --- composer --- */
