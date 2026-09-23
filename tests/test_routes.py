@@ -1,7 +1,7 @@
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -12,6 +12,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from simplechat.config import Settings
 from simplechat.generation import build_chat_messages
 from simplechat.llm import (
+    ChatStream,
     ChunkKind,
     LoadedModel,
     ModelInfo,
@@ -78,7 +79,7 @@ class FakeBackend:
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
-    ) -> AsyncIterator[tuple[ChunkKind, str]]:
+    ) -> ChatStream:
         self.calls.append((model, messages, thinking))
         if self.fail:
             raise APIConnectionError(request=None)  # type: ignore[arg-type]

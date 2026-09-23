@@ -6,7 +6,7 @@ can only be listed and unloaded natively, so those calls use the native API.
 """
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -23,6 +23,10 @@ UNLOAD_TIMEOUT_SECONDS = 30.0
 THINKING_OFF = "none"
 
 type ChunkKind = Literal["thinking", "content"]
+
+# A generator, not just an iterator: stopping a reply closes it with `aclose()`,
+# and that is what closes the connection so the model stops generating.
+type ChatStream = AsyncGenerator[tuple[ChunkKind, str]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +74,7 @@ class ChatBackend(Protocol):
 
     def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
-    ) -> AsyncIterator[tuple[ChunkKind, str]]: ...
+    ) -> ChatStream: ...
 
 
 class OllamaBackend:
@@ -153,7 +157,7 @@ class OllamaBackend:
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
-    ) -> AsyncIterator[tuple[ChunkKind, str]]:
+    ) -> ChatStream:
         """Yield ("thinking", text) and ("content", text) chunks as they arrive.
 
         `thinking` is a level from `model_info`; empty means the model's default.

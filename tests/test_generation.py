@@ -1,10 +1,9 @@
 import asyncio
-from collections.abc import AsyncIterator
 
 from openai.types.chat import ChatCompletionMessageParam
 
 from simplechat.generation import Generations
-from simplechat.llm import ChunkKind
+from simplechat.llm import ChatStream
 from simplechat.store import Conversation
 
 
@@ -14,7 +13,7 @@ class RecordingBackend:
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
-    ) -> AsyncIterator[tuple[ChunkKind, str]]:
+    ) -> ChatStream:
         self.calls += 1
         yield "content", "never reached"
 
