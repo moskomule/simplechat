@@ -1,0 +1,12 @@
+<nav class="conversation-list" id="conversation-list"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for item in conversations %}
+  <div class="conversation-item{% if item.id == current_id %} active{% endif %}">
+    <a href="/c/{{ item.id }}">{{ item.title }}</a>
+    <button class="icon-button" type="button" aria-label="Delete chat"
+            hx-delete="/c/{{ item.id }}"
+            hx-vals='{"current": "{{ current_id }}"}'
+            hx-confirm="Delete this chat?"
+            hx-target="#conversation-list" hx-swap="outerHTML">×</button>
+  </div>
+  {% endfor %}
+</nav>

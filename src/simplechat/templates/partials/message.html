@@ -1,0 +1,55 @@
+{% import "partials/icons.html" as icons %}
+{% set base = "/c/" ~ conversation.id ~ "/messages/" ~ message.id %}
+{% set index, total = conversation.version(message.id) %}
+<article class="msg {{ message.role }} {{ message.status }}" id="m-{{ message.id }}"
+  {%- if message.is_busy %}
+  hx-ext="sse" sse-connect="/c/{{ conversation.id }}/stream/{{ message.id }}"
+  sse-close="done" sse-swap="done" hx-swap="outerHTML"
+  {%- endif %}>
+  <div class="bubble">
+    {#
+      A busy message renders empty: its stream replays everything generated so
+      far, so rendering the partial text here would show it twice after a reload.
+    #}
+    {% if message.is_busy %}
+    {# Hidden until thinking text arrives (see style.css). #}
+    <details class="thinking" open>
+      <summary>Thinking…</summary>
+      <div class="thinking-content" sse-swap="thinking" hx-swap="beforeend"></div>
+    </details>
+    <div class="content" sse-swap="content" hx-swap="beforeend"></div>
+    {% else %}
+    {% if message.thinking %}
+    <details class="thinking">
+      <summary>Thoughts</summary>
+      <div class="thinking-content">{{ message.thinking }}</div>
+    </details>
+    {% endif %}
+    <div class="content">{{ message.content }}</div>
+    {% endif %}
+    {% if message.status == "error" %}<p class="error">{{ message.error }}</p>{% endif %}
+  </div>
+  {% if not message.is_busy %}
+  <div class="actions">
+    {% if total > 1 %}
+    <div class="versions">
+      <button class="icon-button" type="button" aria-label="Previous version"
+              hx-post="{{ base }}/switch" hx-vals='{"step": -1}' hx-target="#thread"
+              {% if index == 1 %}disabled{% endif %}>‹</button>
+      <span>{{ index }} / {{ total }}</span>
+      <button class="icon-button" type="button" aria-label="Next version"
+              hx-post="{{ base }}/switch" hx-vals='{"step": 1}' hx-target="#thread"
+              {% if index == total %}disabled{% endif %}>›</button>
+    </div>
+    {% endif %}
+    {% if message.role == "user" %}
+    <button class="icon-button" type="button" aria-label="Edit" title="Edit"
+            hx-get="{{ base }}/edit" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">{{ icons.edit() }}</button>
+    {% else %}
+    {% set label = "Retry" if message.status == "error" else "Regenerate" %}
+    <button class="icon-button" type="button" aria-label="{{ label }}" title="{{ label }}"
+            hx-post="{{ base }}/regenerate" hx-target="#thread">{{ icons.regenerate() }}</button>
+    {% endif %}
+  </div>
+  {% endif %}
+</article>

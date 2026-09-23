@@ -1,0 +1,38 @@
+[project]
+name = "simplechat"
+version = "0.1.0"
+description = "A minimal ChatGPT-style chat UI for Ollama, built with FastAPI and htmx"
+authors = [
+    { name = "Ryuichiro Hataya", email = "moskomule@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx2>=2.13.0",
+    "jinja2>=3.1.6",
+    "openai>=3.19.0",
+    "python-multipart>=0.0.32",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[project.scripts]
+simplechat = "simplechat.main:run"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

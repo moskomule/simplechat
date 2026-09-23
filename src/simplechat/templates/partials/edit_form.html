@@ -1,0 +1,10 @@
+{% set base = "/c/" ~ conversation.id ~ "/messages/" ~ message.id %}
+<article class="msg user editing" id="m-{{ message.id }}">
+  <form class="edit-form" hx-post="{{ base }}/edit" hx-target="#thread">
+    <textarea name="content" rows="3" aria-label="Edit message" required autofocus>{{ message.content }}</textarea>
+    <div class="edit-actions">
+      <button class="action" type="button" hx-get="{{ base }}" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">Cancel</button>
+      <button class="action primary" type="submit">Send</button>
+    </div>
+  </form>
+</article>

@@ -1,0 +1,9 @@
+{% macro label(level) %}{{ "off" if level == "none" else level }}{% endmacro %}
+<select name="thinking" id="thinking-select" aria-label="Thinking level"{% if not thinking_options %} hidden{% endif %}>
+  {% if thinking_options %}
+  <option value="">Thinking: default{% if thinking_options.default %} ({{ label(thinking_options.default) }}){% endif %}</option>
+  {% for level in thinking_options.levels %}
+  <option value="{{ level }}"{% if level == conversation.thinking %} selected{% endif %}>Thinking: {{ label(level) }}</option>
+  {% endfor %}
+  {% endif %}
+</select>

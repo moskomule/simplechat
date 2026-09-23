@@ -1,0 +1,434 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --surface: #f4f4f5;
+  --sidebar-bg: #f9f9fa;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --danger: #dc2626;
+  --radius: 18px;
+  --content-width: 48rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1f22;
+    --fg: #e6e6e6;
+    --muted: #9ca3af;
+    --border: #34363b;
+    --surface: #2c2e33;
+    --sidebar-bg: #17181a;
+    --accent: #5b8def;
+    --danger: #f87171;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+button,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.app {
+  display: flex;
+  height: 100dvh;
+}
+
+/* --- sidebar --- */
+
+.sidebar {
+  display: flex;
+  flex: 0 0 260px;
+  flex-direction: column;
+  gap: 8px;
+  padding: calc(12px + env(safe-area-inset-top)) 12px 12px calc(12px + env(safe-area-inset-left));
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+}
+
+.new-chat {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.conversation-item.active,
+.conversation-item:hover {
+  background: var(--surface);
+}
+
+.conversation-item a {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+}
+
+.icon-button:not(:disabled):hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.backdrop {
+  display: none;
+}
+
+/* --- main column --- */
+
+.chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.menu-toggle {
+  display: none;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.settings {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings select {
+  min-height: 40px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.system-prompt summary {
+  padding: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.system-prompt[open] {
+  flex-basis: 100%;
+}
+
+.system-prompt textarea {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.scroller {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.empty {
+  margin: 20vh 0 0;
+  color: var(--muted);
+  font-size: 22px;
+  text-align: center;
+}
+
+.empty:not(:only-child) {
+  display: none;
+}
+
+/* --- messages --- */
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg.user {
+  align-items: flex-end;
+}
+
+.msg.user .bubble {
+  max-width: 85%;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.content {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.thinking {
+  margin-bottom: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.thinking summary {
+  cursor: pointer;
+}
+
+.thinking:has(.thinking-content:empty) {
+  display: none;
+}
+
+.thinking-content {
+  max-height: 40dvh;
+  margin-top: 4px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.msg.pending .content:empty::after,
+.msg.streaming .content:empty::after {
+  content: "●";
+  color: var(--muted);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.versions {
+  display: flex;
+  align-items: center;
+}
+
+.action {
+  min-height: 36px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.action:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.action.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.edit-form textarea {
+  width: 100%;
+  padding: 10px 14px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* app.js makes these inert while a reply is being generated. */
+:is(.actions, .send)[inert] {
+  opacity: 0.4;
+}
+
+/* --- composer --- */
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 8px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+.composer textarea {
+  flex: 1;
+  max-height: 40dvh;
+  padding: 10px 16px;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  /* 16px or more stops iOS Safari from zooming in on focus. */
+  font-size: 16px;
+}
+
+.composer textarea:focus,
+.edit-form textarea:focus,
+.system-prompt textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.send {
+  flex: 0 0 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 20px;
+}
+
+/* --- small screens: the sidebar becomes a drawer --- */
+
+@media (max-width: 767px) {
+  .menu-toggle {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(80vw, 300px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .sidebar-open .sidebar {
+    transform: none;
+  }
+
+  .sidebar-open .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgb(0 0 0 / 0.35);
+  }
+
+  .msg.user .bubble {
+    max-width: 90%;
+  }
+}

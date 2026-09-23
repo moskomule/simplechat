@@ -1,0 +1,4 @@
+{% for message in new_messages %}
+{% include "partials/message.html" %}
+{% endfor %}
+{% with current_id = conversation.id, oob = true %}{% include "partials/sidebar.html" %}{% endwith %}
