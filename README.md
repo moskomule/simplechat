@@ -43,7 +43,7 @@ One `uv run`, then chat from your laptop, or from your phone on the same Wi-Fi.
 - 🖼️ **Images for vision models:** attach them (on a phone, straight from the camera) or paste them, preview them before sending, and drop them when editing.
 - 🎛️ **Per-chat settings:** model, thinking level, and a system prompt saved with an explicit Save button.
 - 📱 **Made for phones too:** responsive layout, a slide-in chat list, and the address to open printed at startup.
-- 
+ 
 Conversations live in memory, so they're gone when the server stops. That keeps the app simple, with nothing to set up or clean up.
 
 ## Quick start
