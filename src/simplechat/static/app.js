@@ -261,6 +261,7 @@ syncPromptState();
 // remembered per browser, and chat.html's <head> restores them before first paint.
 
 const root = document.documentElement;
+const sidebar = document.getElementById("sidebar");
 const wideScreen = window.matchMedia("(min-width: 768px)");
 
 function toggleRemembered(state) {
@@ -273,31 +274,49 @@ function toggleRemembered(state) {
   }
 }
 
-function toggleSidebar() {
-  if (wideScreen.matches) toggleRemembered("sidebar-collapsed");
-  else document.body.classList.toggle("sidebar-open");
-}
-
-function syncToggles() {
-  const sidebarShown = wideScreen.matches
+// Decided from the state classes: the sidebar only turns `visibility: hidden` once
+// its slide-out transition ends.
+function sidebarShown() {
+  return wideScreen.matches
     ? !root.classList.contains("sidebar-collapsed")
     : document.body.classList.contains("sidebar-open");
+}
+
+function toggleSidebar() {
+  const focusInside = sidebar.contains(document.activeElement);
+  if (wideScreen.matches) toggleRemembered("sidebar-collapsed");
+  else document.body.classList.toggle("sidebar-open");
+  // Focus left in the sidebar would be stranded once it hides, so hand it to the
+  // button that opens it again.
+  if (focusInside && !sidebarShown()) focusFirstVisible(".sidebar-opener");
+}
+
+// Pressing the backdrop would otherwise move focus out of the drawer to <body>
+// before its click closes the drawer, so toggleSidebar() could not see it.
+document.querySelector(".backdrop").addEventListener("mousedown", (event) => {
+  event.preventDefault();
+});
+
+function syncToggles() {
   const topbarShown = !root.classList.contains("topbar-hidden");
   document.querySelectorAll("button[data-sidebar-toggle]").forEach((button) => {
-    button.setAttribute("aria-expanded", sidebarShown);
+    button.setAttribute("aria-expanded", sidebarShown());
   });
   document.querySelectorAll("button[data-topbar-toggle]").forEach((button) => {
     button.setAttribute("aria-expanded", topbarShown);
   });
 }
 
+function focusFirstVisible(selector, except = null) {
+  const target = [...document.querySelectorAll(selector)].find(
+    (element) => element !== except && element.checkVisibility({ visibilityProperty: true }),
+  );
+  target?.focus();
+}
+
 // A toggle usually hides itself, so hand keyboard focus to the one now shown.
 function moveFocus(from, selector) {
-  if (document.activeElement !== from) return;
-  const next = [...document.querySelectorAll(selector)].find(
-    (button) => button !== from && button.checkVisibility({ visibilityProperty: true }),
-  );
-  next?.focus();
+  if (document.activeElement === from) focusFirstVisible(selector, from);
 }
 
 function bindToggles(selector, toggle) {
