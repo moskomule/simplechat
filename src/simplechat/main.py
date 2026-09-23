@@ -13,10 +13,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from openai import OpenAIError
-from openai.types.chat import ChatCompletionMessageParam
 
 from simplechat.config import Settings
+from simplechat.generation import Generations
 from simplechat.llm import ChatBackend, OllamaBackend
 from simplechat.store import BusyError, Conversation, Message, Store
 
@@ -25,6 +24,11 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.trim_blocks = True
 templates.env.lstrip_blocks = True
 router = APIRouter()
+
+# Every route and store-reading dependency is `async def` on purpose: FastAPI runs
+# plain `def` ones in a thread pool, but the store is not thread-safe. On the event
+# loop, a check such as "is a reply being generated?" and the mutation after it
+# cannot interleave with another request, as long as there is no `await` between them.
 
 
 # --- dependencies ---
@@ -42,12 +46,17 @@ def get_backend(request: Request) -> ChatBackend:
     return request.app.state.backend
 
 
+def get_generations(request: Request) -> Generations:
+    return request.app.state.generations
+
+
 type SettingsDep = Annotated[Settings, Depends(get_settings)]
 type StoreDep = Annotated[Store, Depends(get_store)]
 type BackendDep = Annotated[ChatBackend, Depends(get_backend)]
+type GenerationsDep = Annotated[Generations, Depends(get_generations)]
 
 
-def get_conversation(cid: str, store: StoreDep) -> Conversation:
+async def get_conversation(cid: str, store: StoreDep) -> Conversation:
     if (conversation := store.get(cid)) is None:
         raise HTTPException(404, "Conversation not found")
     return conversation
@@ -56,7 +65,7 @@ def get_conversation(cid: str, store: StoreDep) -> Conversation:
 type ConversationDep = Annotated[Conversation, Depends(get_conversation)]
 
 
-def get_message(mid: str, conversation: ConversationDep) -> Message:
+async def get_message(mid: str, conversation: ConversationDep) -> Message:
     message = conversation.messages.get(mid)
     if message is None or message.role == "root":
         raise HTTPException(404, "Message not found")
@@ -80,21 +89,6 @@ def render_thread(request: Request, conversation: Conversation) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "partials/thread.html", {"conversation": conversation}
     )
-
-
-def build_chat_messages(
-    conversation: Conversation, reply: Message
-) -> list[ChatCompletionMessageParam]:
-    """The prompt for `reply`: the system prompt plus every earlier message in its branch."""
-    messages: list[ChatCompletionMessageParam] = []
-    if conversation.system_prompt.strip():
-        messages.append({"role": "system", "content": conversation.system_prompt})
-    for message in conversation.ancestors(reply.id):
-        if message.role == "user":
-            messages.append({"role": "user", "content": message.content})
-        else:
-            messages.append({"role": "assistant", "content": message.content})
-    return messages
 
 
 # --- pages ---
@@ -134,7 +128,9 @@ async def show_conversation(
 
 
 @router.delete("/c/{cid}")
-def delete_conversation(request: Request, cid: str, store: StoreDep, current: str = "") -> Response:
+async def delete_conversation(
+    request: Request, cid: str, store: StoreDep, current: str = ""
+) -> Response:
     store.delete(cid)
     if cid == current:
         return Response(headers={"HX-Redirect": "/"})
@@ -172,10 +168,12 @@ async def update_settings(
 
 
 @router.post("/c/{cid}/messages", response_class=HTMLResponse)
-def send_message(
+async def send_message(
     request: Request,
     conversation: ConversationDep,
     store: StoreDep,
+    backend: BackendDep,
+    generations: GenerationsDep,
     content: Annotated[str, Form()],
 ) -> HTMLResponse:
     if not content.strip():
@@ -184,6 +182,7 @@ def send_message(
         user, reply = conversation.send(content)
     except BusyError as e:
         raise HTTPException(409, str(e)) from e
+    generations.start(backend, conversation, reply)
     return templates.TemplateResponse(
         request,
         "partials/turn.html",
@@ -196,7 +195,7 @@ def send_message(
 
 
 @router.get("/c/{cid}/messages/{mid}", response_class=HTMLResponse)
-def show_message(
+async def show_message(
     request: Request, conversation: ConversationDep, message: MessageDep
 ) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -205,7 +204,9 @@ def show_message(
 
 
 @router.get("/c/{cid}/messages/{mid}/edit", response_class=HTMLResponse)
-def edit_form(request: Request, conversation: ConversationDep, message: MessageDep) -> HTMLResponse:
+async def edit_form(
+    request: Request, conversation: ConversationDep, message: MessageDep
+) -> HTMLResponse:
     if message.role != "user":
         raise HTTPException(400, "Only user messages can be edited")
     return templates.TemplateResponse(
@@ -214,38 +215,46 @@ def edit_form(request: Request, conversation: ConversationDep, message: MessageD
 
 
 @router.post("/c/{cid}/messages/{mid}/edit", response_class=HTMLResponse)
-def edit_message(
+async def edit_message(
     request: Request,
     conversation: ConversationDep,
     message: MessageDep,
+    backend: BackendDep,
+    generations: GenerationsDep,
     content: Annotated[str, Form()],
 ) -> HTMLResponse:
     if not content.strip():
         raise HTTPException(422, "Message is empty")
     try:
-        conversation.edit(message.id, content)
+        reply = conversation.edit(message.id, content)
     except BusyError as e:
         raise HTTPException(409, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 
 @router.post("/c/{cid}/messages/{mid}/regenerate", response_class=HTMLResponse)
-def regenerate_message(
-    request: Request, conversation: ConversationDep, message: MessageDep
+async def regenerate_message(
+    request: Request,
+    conversation: ConversationDep,
+    message: MessageDep,
+    backend: BackendDep,
+    generations: GenerationsDep,
 ) -> HTMLResponse:
     try:
-        conversation.regenerate(message.id)
+        reply = conversation.regenerate(message.id)
     except BusyError as e:
         raise HTTPException(409, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 
 @router.post("/c/{cid}/messages/{mid}/switch", response_class=HTMLResponse)
-def switch_version(
+async def switch_version(
     request: Request,
     conversation: ConversationDep,
     message: MessageDep,
@@ -260,34 +269,18 @@ def switch_version(
 
 @router.get("/c/{cid}/stream/{mid}", response_class=EventSourceResponse)
 async def stream_reply(
-    conversation: ConversationDep, message: MessageDep, backend: BackendDep
+    conversation: ConversationDep, message: MessageDep, generations: GenerationsDep
 ) -> AsyncIterator[ServerSentEvent]:
-    # A browser reconnecting (or a page reload) must not start a second generation,
-    # so only a pending reply is generated. Anything else just gets its final state.
-    if message.status == "pending":
-        message.status = "streaming"
-        try:
-            if not conversation.model:
-                raise ValueError("No model selected. Is Ollama running?")
-            chunks = backend.stream_chat(
-                conversation.model,
-                build_chat_messages(conversation, message),
-                thinking=conversation.thinking,
-            )
-            async for kind, text in chunks:
-                if kind == "thinking":
-                    message.thinking += text
-                else:
-                    message.content += text
-                yield ServerSentEvent(event=kind, raw_data=escape(text))
-            message.status = "done"
-        except (OpenAIError, ValueError) as e:
-            message.status = "error"
-            message.error = str(e)
-        finally:
-            # The client went away mid-stream: keep what was generated so far.
-            if message.status == "streaming":
-                message.status = "done"
+    """Follow a reply's generation, then send the finished message as `done`.
+
+    Generation runs in the background, started by the route that created the reply.
+    Every client (a reconnect, a reload, a second device) replays the chunks from
+    the start and then follows along, so `done` is only sent once the reply is
+    really finished. A reply that has already finished gets `done` right away.
+    """
+    if (generation := generations.get(message.id)) is not None:
+        async for kind, text in generation.follow():
+            yield ServerSentEvent(event=kind, raw_data=escape(text))
     html = templates.get_template("partials/message.html").render(
         conversation=conversation, message=message
     )
@@ -307,6 +300,7 @@ def create_app(
     app.state.settings = settings
     app.state.backend = backend or OllamaBackend(settings.ollama_url, settings.ollama_api_key)
     app.state.store = store or Store()
+    app.state.generations = Generations()
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
     app.include_router(router)
     return app

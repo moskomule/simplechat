@@ -27,14 +27,18 @@ Conversations are in-memory `Conversation` objects, so everything is lost on res
 - A message's `children` are alternative versions of the next turn. `active_child` selects which one is shown. Following `active_child` from the root gives `active_path()`, which is what the UI renders.
 - Editing a user message adds a sibling user message plus a new `pending` assistant reply. Regenerating adds a sibling assistant message. Nothing is overwritten, and `switch()` moves between siblings.
 - The prompt for a reply is `ancestors(reply_id)`: its branch, not the active path.
-- Every mutation raises `BusyError` while any message is `pending` or `streaming`. Routes turn that into a 409, and CSS (`.chat:has(.msg.pending, .msg.streaming)`) disables the buttons.
+- Every mutation raises `BusyError` while any message is `pending` or `streaming`. Routes turn that into a 409, and `app.js` makes the action and send buttons `inert` (blocking keyboard as well as pointer).
+- The store is not thread-safe. **Every route and store-reading dependency is `async def`**, so it runs on the event loop and a busy check and the mutation after it can't interleave. Don't add `await` between them, and don't add plain `def` routes, which FastAPI would run in a thread pool.
 
-### Streaming lifecycle (`main.py` + `partials/message.html`)
+### Streaming lifecycle (`generation.py`, `main.py`, `partials/message.html`)
 
-1. A route that creates a reply (send, edit or regenerate) returns HTML containing a `pending` assistant `<article>`. Only in that state does it carry `hx-ext="sse" sse-connect=".../stream/{mid}"`.
-2. The browser opens `GET /c/{cid}/stream/{mid}`. That route yields `ServerSentEvent`s named `thinking` and `content` with HTML-escaped text; `sse-swap` appends them with `beforeend`. It then sends a final `done` event whose data is the whole re-rendered message. The article is replaced via `sse-swap="done" hx-swap="outerHTML"`, and `sse-close="done"` stops the stream.
-3. **Only a `pending` reply starts generation.** A reconnect or page reload hitting the stream URL gets `done` with the stored state right away. If the client disconnects mid-stream, the `finally` block marks the reply `done` with the partial text. Keep these guards when you change streaming.
-4. The stream endpoint must always answer 200 and end with `done`. The htmx SSE extension retries forever on error responses.
+1. A route that creates a reply (send, edit or regenerate) calls `Generations.start()`. That runs the model call as a background `asyncio` task, **not tied to any request**: it keeps going if every client disconnects, and it writes into the `Message` as chunks arrive.
+2. The route returns HTML containing the busy assistant `<article>`. Only in that state does it carry `hx-ext="sse" sse-connect=".../stream/{mid}"`. A busy message renders **empty**, because the stream replays everything generated so far.
+3. `GET /c/{cid}/stream/{mid}` follows the running `Generation`: it replays all chunks from the start, then yields new ones as `thinking` and `content` events with HTML-escaped text. `sse-swap` appends them with `beforeend`. Any number of clients (a reconnect, a reload, a second device) can follow the same generation, and the model is called only once.
+4. Only after the generation finishes does the stream send `done`, whose data is the whole re-rendered, finished message. The article is replaced via `sse-swap="done" hx-swap="outerHTML"`, and `sse-close="done"` stops the stream. A reply that already finished gets `done` right away. `done` must never carry a busy message, or the client would reconnect in a loop.
+5. The stream endpoint must always answer 200 and end with `done`. The htmx SSE extension retries forever on error responses.
+
+In tests, the `client` fixture keeps one `TestClient` context (and so one event loop) open across requests, so background generations survive between requests. To check streamed chunks, hold the reply with `FakeBackend.released = False` and use `concurrently()`.
 
 Edit, regenerate and switch return the whole `#thread` (`partials/thread.html`), because everything below the changed message can change. Sending returns only the new turn (`partials/turn.html`), plus an out-of-band swap of the sidebar so the title updates.
 
@@ -42,7 +46,7 @@ Jinja is configured with `trim_blocks` and `lstrip_blocks`. The `.content` and `
 
 ### Ollama backend (`llm.py`)
 
-`ChatBackend` is a Protocol. Routes get it from `app.state` through dependencies, and tests inject `FakeBackend` (`tests/test_routes.py`) or an `httpx2.MockTransport` (`tests/test_llm.py`). `create_app()` is a factory that takes `settings`, `backend` and `store`. `run()` starts uvicorn with `factory=True`.
+`ChatBackend` is a Protocol. Routes get it from `app.state` through dependencies, and tests inject `FakeBackend` (`tests/test_routes.py`) or an `httpx2.MockTransport` (`tests/test_llm.py`). `create_app()` is a factory that takes `settings`, `backend` and `store`, and it creates the `Generations` registry. `run()` starts uvicorn with `factory=True`.
 
 Ollama specifics that the code depends on:
 - Chat uses the OpenAI-compatible API at `{OLLAMA_URL}/v1`. Thinking levels come only from the native `POST /api/show`, which is why the setting is the server root rather than the `/v1` URL.

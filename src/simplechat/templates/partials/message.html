@@ -7,14 +7,26 @@
   sse-close="done" sse-swap="done" hx-swap="outerHTML"
   {%- endif %}>
   <div class="bubble">
-    {% if message.is_busy or message.thinking %}
-    {# While streaming this stays hidden until thinking text arrives (see style.css). #}
-    <details class="thinking"{% if message.is_busy %} open{% endif %}>
-      <summary>{{ "Thinking…" if message.is_busy else "Thoughts" }}</summary>
-      <div class="thinking-content"{% if message.is_busy %} sse-swap="thinking" hx-swap="beforeend"{% endif %}>{{ message.thinking }}</div>
+    {#
+      A busy message renders empty: its stream replays everything generated so
+      far, so rendering the partial text here would show it twice after a reload.
+    #}
+    {% if message.is_busy %}
+    {# Hidden until thinking text arrives (see style.css). #}
+    <details class="thinking" open>
+      <summary>Thinking…</summary>
+      <div class="thinking-content" sse-swap="thinking" hx-swap="beforeend"></div>
+    </details>
+    <div class="content" sse-swap="content" hx-swap="beforeend"></div>
+    {% else %}
+    {% if message.thinking %}
+    <details class="thinking">
+      <summary>Thoughts</summary>
+      <div class="thinking-content">{{ message.thinking }}</div>
     </details>
     {% endif %}
-    <div class="content"{% if message.is_busy %} sse-swap="content" hx-swap="beforeend"{% endif %}>{{ message.content }}</div>
+    <div class="content">{{ message.content }}</div>
+    {% endif %}
     {% if message.status == "error" %}<p class="error">{{ message.error }}</p>{% endif %}
   </div>
   {% if not message.is_busy %}
