@@ -157,6 +157,8 @@ class OllamaBackend:
         """Yield ("thinking", text) and ("content", text) chunks as they arrive.
 
         `thinking` is a level from `model_info`; empty means the model's default.
+        Closing this generator early (a stopped reply) closes the connection, which
+        makes Ollama stop generating.
         """
         stream = await self._client.chat.completions.create(
             model=model,
@@ -166,15 +168,16 @@ class OllamaBackend:
             # the SDK's `reasoning_effort` literal type.
             extra_body={"reasoning_effort": thinking} if thinking else None,
         )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            # Ollama streams thinking in a non-standard `reasoning` field.
-            if reasoning := getattr(delta, "reasoning", None):
-                yield "thinking", reasoning
-            if delta.content:
-                yield "content", delta.content
+        async with stream:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                # Ollama streams thinking in a non-standard `reasoning` field.
+                if reasoning := getattr(delta, "reasoning", None):
+                    yield "thinking", reasoning
+                if delta.content:
+                    yield "content", delta.content
 
 
 def _thinking_options(info: dict[str, Any]) -> ThinkingOptions:
