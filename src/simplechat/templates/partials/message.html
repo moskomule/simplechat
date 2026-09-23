@@ -6,7 +6,14 @@
   sse-close="done" sse-swap="done" hx-swap="outerHTML"
   {%- endif %}>
   <div class="bubble">
-    <div class="content"{% if message.is_busy %} sse-swap="token" hx-swap="beforeend"{% endif %}>{{ message.content }}</div>
+    {% if message.is_busy or message.thinking %}
+    {# While streaming this stays hidden until thinking text arrives (see style.css). #}
+    <details class="thinking"{% if message.is_busy %} open{% endif %}>
+      <summary>{{ "Thinking…" if message.is_busy else "Thoughts" }}</summary>
+      <div class="thinking-content"{% if message.is_busy %} sse-swap="thinking" hx-swap="beforeend"{% endif %}>{{ message.thinking }}</div>
+    </details>
+    {% endif %}
+    <div class="content"{% if message.is_busy %} sse-swap="content" hx-swap="beforeend"{% endif %}>{{ message.content }}</div>
     {% if message.status == "error" %}<p class="error">{{ message.error }}</p>{% endif %}
   </div>
   {% if not message.is_busy %}

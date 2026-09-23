@@ -2,7 +2,7 @@ from simplechat.config import Settings
 from simplechat.main import parse_args
 
 SETTINGS = Settings(
-    ollama_base_url="http://unused",
+    ollama_url="http://unused",
     ollama_api_key="unused",
     default_model="",
     host="0.0.0.0",

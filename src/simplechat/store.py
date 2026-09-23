@@ -30,6 +30,7 @@ class BusyError(Exception):
 class Message:
     role: Role
     content: str = ""
+    thinking: str = ""
     parent_id: str | None = None
     status: Status = "done"
     error: str | None = None
@@ -46,6 +47,8 @@ class Message:
 class Conversation:
     model: str
     system_prompt: str = ""
+    # A level from the model's thinking options; empty means the model's default.
+    thinking: str = ""
     title: str = DEFAULT_TITLE
     id: str = field(default_factory=new_id)
     updated_at: float = field(default_factory=time.time)

@@ -7,31 +7,44 @@ from openai import APIConnectionError
 from openai.types.chat import ChatCompletionMessageParam
 
 from simplechat.config import Settings
+from simplechat.llm import ChunkKind, ThinkingOptions
 from simplechat.main import create_app
 from simplechat.store import Conversation, Store
 
 SETTINGS = Settings(
-    ollama_base_url="http://unused",
+    ollama_url="http://unused",
     ollama_api_key="unused",
     default_model="",
     host="127.0.0.1",
     port=8000,
 )
 
+# llama3 cannot think; qwen3 can.
+QWEN_THINKING = ThinkingOptions(levels=["none", "low", "high"], default="high")
+
 
 class FakeBackend:
-    def __init__(self, chunks: list[str] | None = None, fail: bool = False) -> None:
-        self.chunks = chunks or ["Hello", ", <world>", "!\nBye"]
+    def __init__(
+        self, chunks: list[tuple[ChunkKind, str]] | None = None, fail: bool = False
+    ) -> None:
+        self.chunks = chunks or [
+            ("content", "Hello"),
+            ("content", ", <world>"),
+            ("content", "!\nBye"),
+        ]
         self.fail = fail
-        self.calls: list[tuple[str, list[ChatCompletionMessageParam]]] = []
+        self.calls: list[tuple[str, list[ChatCompletionMessageParam], str]] = []
 
     async def list_models(self) -> list[str]:
         return ["llama3", "qwen3"]
 
+    async def thinking_options(self, model: str) -> ThinkingOptions | None:
+        return QWEN_THINKING if model == "qwen3" else None
+
     async def stream_chat(
-        self, model: str, messages: list[ChatCompletionMessageParam]
-    ) -> AsyncIterator[str]:
-        self.calls.append((model, messages))
+        self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
+    ) -> AsyncIterator[tuple[ChunkKind, str]]:
+        self.calls.append((model, messages, thinking))
         if self.fail:
             raise APIConnectionError(request=None)  # type: ignore[arg-type]
         for chunk in self.chunks:
@@ -94,8 +107,8 @@ def test_send_and_stream(
     reply = conversation.active_path()[1]
     body = stream(client, conversation, reply.id)
 
-    assert "event: token\ndata: , &lt;world&gt;" in body
-    # A newline inside a token becomes two data lines, which the browser joins with "\n".
+    assert "event: content\ndata: , &lt;world&gt;" in body
+    # A newline inside a chunk becomes two data lines, which the browser joins with "\n".
     assert "data: !\ndata: Bye" in body
     assert "event: done" in body
     assert reply.content == "Hello, <world>!\nBye"
@@ -107,8 +120,60 @@ def test_send_and_stream(
                 {"role": "system", "content": "Be brief."},
                 {"role": "user", "content": "Hi <b>"},
             ],
+            "",
         )
     ]
+
+
+def test_thinking_is_streamed_and_kept_out_of_history(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.chunks = [("thinking", "Hmm <ok>"), ("content", "Answer")]
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Q1"})
+    reply = conversation.active_path()[1]
+    body = stream(client, conversation, reply.id)
+
+    assert "event: thinking\ndata: Hmm &lt;ok&gt;" in body
+    assert reply.thinking == "Hmm <ok>"
+    assert reply.content == "Answer"
+    # The finished message shows the thoughts collapsed.
+    assert '<details class="thinking">' in body
+    assert "Thoughts" in body
+
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Q2"})
+    stream(client, conversation, conversation.active_path()[-1].id)
+    _, history, _ = backend.calls[-1]
+    assert history[1] == {"role": "assistant", "content": "Answer"}
+
+
+def test_thinking_picker_follows_model(client: TestClient, conversation: Conversation) -> None:
+    page = client.get(f"/c/{conversation.id}")
+    assert 'id="thinking-select" aria-label="Thinking level" hidden' in page.text
+
+    response = client.post(
+        f"/c/{conversation.id}/settings", data={"model": "qwen3", "thinking": "none"}
+    )
+    assert response.status_code == 200
+    assert "Thinking: default (high)" in response.text
+    assert '<option value="none" selected>Thinking: off</option>' in response.text
+    assert conversation.thinking == "none"
+
+    # llama3 cannot think, so the level resets and the picker hides.
+    response = client.post(
+        f"/c/{conversation.id}/settings", data={"model": "llama3", "thinking": "none"}
+    )
+    assert conversation.thinking == ""
+    assert "hidden" in response.text
+
+
+def test_thinking_level_is_sent(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    client.post(f"/c/{conversation.id}/settings", data={"model": "qwen3", "thinking": "low"})
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    stream(client, conversation, conversation.active_path()[1].id)
+    assert backend.calls[-1][0] == "qwen3"
+    assert backend.calls[-1][2] == "low"
 
 
 def test_stream_twice_does_not_regenerate(
@@ -118,7 +183,7 @@ def test_stream_twice_does_not_regenerate(
     reply = conversation.active_path()[1]
     stream(client, conversation, reply.id)
     body = stream(client, conversation, reply.id)
-    assert "event: token" not in body
+    assert "event: content" not in body
     assert "event: done" in body
     assert len(backend.calls) == 1
 
@@ -188,7 +253,7 @@ def test_update_settings(client: TestClient, conversation: Conversation) -> None
         f"/c/{conversation.id}/settings",
         data={"model": "qwen3", "system_prompt": "Answer in Japanese."},
     )
-    assert response.status_code == 204
+    assert response.status_code == 200
     assert conversation.model == "qwen3"
     assert conversation.system_prompt == "Answer in Japanese."
 

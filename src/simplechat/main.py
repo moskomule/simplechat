@@ -121,14 +121,14 @@ async def create_conversation(
 async def show_conversation(
     request: Request, conversation: ConversationDep, store: StoreDep, backend: BackendDep
 ) -> HTMLResponse:
-    models = await backend.list_models()
     return templates.TemplateResponse(
         request,
         "chat.html",
         {
             "conversation": conversation,
             "conversations": store.recent(),
-            "models": models,
+            "models": await backend.list_models(),
+            "thinking_options": await backend.thinking_options(conversation.model),
         },
     )
 
@@ -145,15 +145,27 @@ def delete_conversation(request: Request, cid: str, store: StoreDep, current: st
     )
 
 
-@router.post("/c/{cid}/settings", status_code=204)
-def update_settings(
+@router.post("/c/{cid}/settings", response_class=HTMLResponse)
+async def update_settings(
+    request: Request,
     conversation: ConversationDep,
+    backend: BackendDep,
     model: Annotated[str, Form()] = "",
+    thinking: Annotated[str, Form()] = "",
     system_prompt: Annotated[str, Form()] = "",
-) -> None:
+) -> HTMLResponse:
+    """Save the settings and return the thinking picker, whose levels depend on the model."""
     if model:
         conversation.model = model
     conversation.system_prompt = system_prompt
+    options = await backend.thinking_options(conversation.model)
+    # A level picked for the previous model may not exist for this one.
+    conversation.thinking = thinking if options and thinking in options.levels else ""
+    return templates.TemplateResponse(
+        request,
+        "partials/thinking_select.html",
+        {"conversation": conversation, "thinking_options": options},
+    )
 
 
 # --- messages ---
@@ -258,11 +270,16 @@ async def stream_reply(
             if not conversation.model:
                 raise ValueError("No model selected. Is Ollama running?")
             chunks = backend.stream_chat(
-                conversation.model, build_chat_messages(conversation, message)
+                conversation.model,
+                build_chat_messages(conversation, message),
+                thinking=conversation.thinking,
             )
-            async for text in chunks:
-                message.content += text
-                yield ServerSentEvent(event="token", raw_data=escape(text))
+            async for kind, text in chunks:
+                if kind == "thinking":
+                    message.thinking += text
+                else:
+                    message.content += text
+                yield ServerSentEvent(event=kind, raw_data=escape(text))
             message.status = "done"
         except (OpenAIError, ValueError) as e:
             message.status = "error"
@@ -288,7 +305,7 @@ def create_app(
     settings = settings or Settings.from_env()
     app = FastAPI(title="SimpleChat")
     app.state.settings = settings
-    app.state.backend = backend or OllamaBackend(settings.ollama_base_url, settings.ollama_api_key)
+    app.state.backend = backend or OllamaBackend(settings.ollama_url, settings.ollama_api_key)
     app.state.store = store or Store()
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
     app.include_router(router)

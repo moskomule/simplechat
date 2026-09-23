@@ -450,6 +450,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "jinja2" },
     { name = "openai" },
     { name = "python-multipart" },
@@ -465,6 +466,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "httpx2", specifier = ">=2.13.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "openai", specifier = ">=3.19.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },

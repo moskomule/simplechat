@@ -243,6 +243,30 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.thinking {
+  margin-bottom: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.thinking summary {
+  cursor: pointer;
+}
+
+.thinking:has(.thinking-content:empty) {
+  display: none;
+}
+
+.thinking-content {
+  max-height: 40dvh;
+  margin-top: 4px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .msg.pending .content:empty::after,
 .msg.streaming .content:empty::after {
   content: "●";
