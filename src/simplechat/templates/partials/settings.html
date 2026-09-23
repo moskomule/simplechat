@@ -1,0 +1,17 @@
+<form class="settings" hx-post="/c/{{ conversation.id }}/settings" hx-trigger="change" hx-swap="none">
+  <select name="model" aria-label="Model">
+    {% if conversation.model and conversation.model not in models %}
+    <option value="{{ conversation.model }}" selected>{{ conversation.model }}</option>
+    {% endif %}
+    {% for model in models %}
+    <option value="{{ model }}"{% if model == conversation.model %} selected{% endif %}>{{ model }}</option>
+    {% endfor %}
+    {% if not models and not conversation.model %}
+    <option value="" selected>No models found</option>
+    {% endif %}
+  </select>
+  <details class="system-prompt">
+    <summary>System prompt</summary>
+    <textarea name="system_prompt" rows="5" placeholder="You are a helpful assistant.">{{ conversation.system_prompt }}</textarea>
+  </details>
+</form>

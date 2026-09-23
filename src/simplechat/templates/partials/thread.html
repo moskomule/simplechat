@@ -1,0 +1,4 @@
+<p class="empty">How can I help you today?</p>
+{% for message in conversation.active_path() %}
+{% include "partials/message.html" %}
+{% endfor %}

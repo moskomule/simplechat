@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <title>{{ conversation.title }} · SimpleChat</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/sse.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <form method="post" action="/c">
+        <button class="new-chat" type="submit">+ New chat</button>
+      </form>
+      {% with current_id = conversation.id %}{% include "partials/sidebar.html" %}{% endwith %}
+    </aside>
+    <div class="backdrop" data-sidebar-toggle></div>
+
+    <main class="chat">
+      <header class="topbar">
+        <button class="icon-button menu-toggle" type="button" aria-label="Open chat list" data-sidebar-toggle>☰</button>
+        {% include "partials/settings.html" %}
+      </header>
+
+      <div class="scroller" id="scroller">
+        <div class="thread" id="thread">
+          {% include "partials/thread.html" %}
+        </div>
+      </div>
+
+      <form class="composer" id="composer"
+            hx-post="/c/{{ conversation.id }}/messages"
+            hx-target="#thread" hx-swap="beforeend"
+            hx-disabled-elt="find button"
+            hx-on::after-request="if (event.detail.successful) this.reset()">
+        <textarea name="content" rows="1" placeholder="Message" aria-label="Message" required></textarea>
+        <button class="send" type="submit" aria-label="Send">↑</button>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

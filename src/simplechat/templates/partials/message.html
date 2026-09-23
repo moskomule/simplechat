@@ -1,0 +1,34 @@
+{% set base = "/c/" ~ conversation.id ~ "/messages/" ~ message.id %}
+{% set index, total = conversation.version(message.id) %}
+<article class="msg {{ message.role }} {{ message.status }}" id="m-{{ message.id }}"
+  {%- if message.is_busy %}
+  hx-ext="sse" sse-connect="/c/{{ conversation.id }}/stream/{{ message.id }}"
+  sse-close="done" sse-swap="done" hx-swap="outerHTML"
+  {%- endif %}>
+  <div class="bubble">
+    <div class="content"{% if message.is_busy %} sse-swap="token" hx-swap="beforeend"{% endif %}>{{ message.content }}</div>
+    {% if message.status == "error" %}<p class="error">{{ message.error }}</p>{% endif %}
+  </div>
+  {% if not message.is_busy %}
+  <div class="actions">
+    {% if total > 1 %}
+    <div class="versions">
+      <button class="icon-button" type="button" aria-label="Previous version"
+              hx-post="{{ base }}/switch" hx-vals='{"step": -1}' hx-target="#thread"
+              {% if index == 1 %}disabled{% endif %}>‹</button>
+      <span>{{ index }} / {{ total }}</span>
+      <button class="icon-button" type="button" aria-label="Next version"
+              hx-post="{{ base }}/switch" hx-vals='{"step": 1}' hx-target="#thread"
+              {% if index == total %}disabled{% endif %}>›</button>
+    </div>
+    {% endif %}
+    {% if message.role == "user" %}
+    <button class="action" type="button" hx-get="{{ base }}/edit" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">Edit</button>
+    {% else %}
+    <button class="action" type="button" hx-post="{{ base }}/regenerate" hx-target="#thread">
+      {{- "Retry" if message.status == "error" else "Regenerate" -}}
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+</article>
