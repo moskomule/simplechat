@@ -62,6 +62,10 @@ class Generations:
     def get(self, message_id: str) -> Generation | None:
         return self._running.get(message_id)
 
+    @property
+    def any_running(self) -> bool:
+        return bool(self._running)
+
     def start(self, backend: ChatBackend, conversation: Conversation, reply: Message) -> None:
         generation = Generation()
         self._running[reply.id] = generation

@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 
 from simplechat.config import Settings
 from simplechat.generation import Generations
-from simplechat.llm import ChatBackend, OllamaBackend
+from simplechat.llm import ChatBackend, LoadedModel, OllamaBackend, UnloadError
 from simplechat.store import BusyError, Conversation, Image, Message, Store
 
 BASE_DIR = Path(__file__).parent
@@ -124,6 +124,11 @@ async def read_images(uploads: list[UploadFile]) -> list[Image]:
     return images
 
 
+def describe_models(models: list[LoadedModel]) -> str:
+    """e.g. "qwen3 (19.7 GB), llama3 (4.2 GB)", with sizes in decimal GB like `ollama ps`."""
+    return ", ".join(f"{model.name} ({model.size / 1e9:.1f} GB)" for model in models)
+
+
 async def ensure_vision(backend: ChatBackend, conversation: Conversation) -> None:
     """Check that the conversation's model can read images.
 
@@ -212,6 +217,30 @@ async def update_settings(
         "partials/model_controls.html",
         {"conversation": conversation, "thinking_options": options, "vision": info.vision},
     )
+
+
+@router.post("/free-memory", response_class=HTMLResponse)
+async def free_memory(backend: BackendDep, generations: GenerationsDep) -> HTMLResponse:
+    """Unload every model Ollama has loaded, freeing its weights and KV cache.
+
+    The response is a short status text for the top bar, so every outcome is a
+    200: htmx does not swap error responses, and the user should see why.
+    """
+    if generations.any_running:
+        return HTMLResponse("Wait for the reply to finish")
+    try:
+        result = await backend.unload_models()
+    except UnloadError as e:
+        return HTMLResponse(escape(str(e)))
+    if not result.unloaded and not result.pending:
+        return HTMLResponse("No models were loaded")
+    parts = []
+    if result.unloaded:
+        parts.append(f"Unloaded {describe_models(result.unloaded)}.")
+    if result.pending:
+        # Another client is using them; Ollama unloads them once that reply ends.
+        parts.append(f"{describe_models(result.pending)} will unload after its current reply.")
+    return HTMLResponse(escape(" ".join(parts)))
 
 
 @router.post("/c/{cid}/system-prompt", status_code=204)

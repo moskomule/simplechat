@@ -43,6 +43,11 @@
         <button class="icon-button bar-toggle sidebar-opener" type="button" aria-label="Open chat list" title="Open chat list"
                 aria-controls="sidebar" aria-expanded="false" data-sidebar-toggle>{{ icons.panel_left_open() }}</button>
         {% include "partials/settings.html" %}
+        {# Unloads every model from Ollama; app.js clears the status after a few seconds. #}
+        <span class="memory-status" id="memory-status" role="status"></span>
+        <button class="icon-button free-memory" type="button" aria-label="Free memory: unload all models from Ollama"
+                title="Free memory (unload all models)" hx-post="/free-memory" hx-target="#memory-status"
+                hx-disabled-elt="this">{{ icons.memory_stick() }}</button>
         <button class="icon-button bar-toggle" type="button" aria-label="Hide top bar" title="Hide top bar"
                 aria-controls="topbar" aria-expanded="true" data-topbar-toggle>{{ icons.panel_top_close() }}</button>
       </header>

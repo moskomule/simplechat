@@ -62,6 +62,7 @@ Ollama specifics that the code depends on:
 - `/api/show` returns `thinking.values` like `[false, "low", "medium", "high"]`. `false` is mapped to `"none"`, which turns thinking off. The level is sent as `extra_body={"reasoning_effort": ...}`, because level names are model-defined, and it's omitted for the model's default.
 - Thinking text streams in the non-standard `delta.reasoning` field. It is stored in `Message.thinking` and never sent back as history.
 - `/v1/models` returns `"data": null` when no model is pulled.
+- "Free memory" (`POST /free-memory` → `unload_models()`) lists loaded models with native `GET /api/ps`, then unloads each with `POST /api/generate {"model": ..., "keep_alive": 0}` (no prompt). That frees weights and KV cache together; Ollama has no way to drop only the KV cache. An idle model is gone from `/api/ps` as soon as that request returns (measured on Ollama 0.34), but one still answering another client stays loaded until its reply ends, so `/api/ps` is read again to report those as pending. These calls use a 30 s timeout, because Ollama can answer slowly while loading a model. The route refuses while any reply is generating, and answers every outcome with a 200 status text, since htmx does not swap error responses.
 
 ### Library versions
 

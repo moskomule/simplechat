@@ -241,6 +241,37 @@ button:disabled {
   font-size: 14px;
 }
 
+/* --- free memory: the result shows as a toast under the top bar --- */
+
+.topbar {
+  position: relative;
+}
+
+.free-memory {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.memory-status {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 12px;
+  z-index: 5;
+  max-width: calc(100% - 24px);
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  /* Lifted off the page so it doesn't read as part of the chat below it. */
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.memory-status:empty {
+  display: none;
+}
+
 .scroller {
   flex: 1;
   overflow-y: auto;
@@ -519,7 +550,7 @@ button:disabled {
 }
 
 /* app.js makes these inert while a reply is being generated. */
-:is(.actions, .send)[inert] {
+:is(.actions, .send, .free-memory)[inert] {
   opacity: 0.4;
 }
 

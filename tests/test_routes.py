@@ -11,7 +11,14 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from simplechat.config import Settings
 from simplechat.generation import build_chat_messages
-from simplechat.llm import ChunkKind, ModelInfo, ThinkingOptions
+from simplechat.llm import (
+    ChunkKind,
+    LoadedModel,
+    ModelInfo,
+    ThinkingOptions,
+    UnloadError,
+    UnloadResult,
+)
 from simplechat.main import create_app
 from simplechat.store import Conversation, Image, Store
 
@@ -40,12 +47,27 @@ class FakeBackend:
         # Set to False to hold replies in the "streaming" state until set back to True.
         self.released = True
         self.calls: list[tuple[str, list[ChatCompletionMessageParam], str]] = []
+        # Models "in memory" for unload_models. Busy ones (answering another client)
+        # stay loaded; set unload_fails to simulate Ollama being down.
+        self.loaded: list[LoadedModel] = []
+        self.busy: set[str] = set()
+        self.unload_fails = False
 
     async def list_models(self) -> list[str]:
         return ["llama3", "qwen3"]
 
     async def model_info(self, model: str) -> ModelInfo:
         return ModelInfo(thinking=QWEN_THINKING, vision=True) if model == "qwen3" else ModelInfo()
+
+    async def unload_models(self) -> UnloadResult:
+        if self.unload_fails:
+            raise UnloadError("Could not reach Ollama")
+        result = UnloadResult(
+            unloaded=[model for model in self.loaded if model.name not in self.busy],
+            pending=[model for model in self.loaded if model.name in self.busy],
+        )
+        self.loaded = result.pending
+        return result
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
@@ -608,6 +630,54 @@ def test_system_prompt_has_its_own_form(client: TestClient, conversation: Conver
     assert f'hx-post="/c/{conversation.id}/system-prompt"' in prompt_form[0]
     assert ">Be brief.</textarea>" in prompt_form[0]
     assert '<button class="action primary" type="submit" disabled>Save</button>' in prompt_form[0]
+
+
+def test_page_has_free_memory_button(client: TestClient, conversation: Conversation) -> None:
+    page = client.get(f"/c/{conversation.id}").text
+    assert 'hx-post="/free-memory" hx-target="#memory-status"' in page
+    assert 'id="memory-status" role="status"' in page
+
+
+def test_free_memory_unloads_every_loaded_model(client: TestClient, backend: FakeBackend) -> None:
+    backend.loaded = [LoadedModel("qwen3", 19_700_000_000), LoadedModel("<llama3>", 4_200_000_000)]
+    response = client.post("/free-memory")
+    assert response.status_code == 200
+    assert response.text == "Unloaded qwen3 (19.7 GB), &lt;llama3&gt; (4.2 GB)."
+    assert backend.loaded == []
+
+    assert client.post("/free-memory").text == "No models were loaded"
+
+
+def test_free_memory_reports_models_busy_elsewhere(
+    client: TestClient, backend: FakeBackend
+) -> None:
+    backend.loaded = [LoadedModel("qwen3", 19_700_000_000), LoadedModel("llama3", 4_200_000_000)]
+    backend.busy = {"llama3"}  # answering another client, so Ollama unloads it afterwards
+    assert client.post("/free-memory").text == (
+        "Unloaded qwen3 (19.7 GB). llama3 (4.2 GB) will unload after its current reply."
+    )
+
+    backend.loaded = [LoadedModel("llama3", 4_200_000_000)]
+    assert client.post("/free-memory").text == (
+        "llama3 (4.2 GB) will unload after its current reply."
+    )
+
+
+def test_free_memory_waits_for_a_running_reply(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.loaded = [LoadedModel("llama3", 1)]
+    backend.released = False
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    response = client.post("/free-memory")
+    backend.released = True
+    assert response.text == "Wait for the reply to finish"
+    assert backend.loaded == [LoadedModel("llama3", 1)]
+
+
+def test_free_memory_reports_ollama_errors(client: TestClient, backend: FakeBackend) -> None:
+    backend.unload_fails = True
+    assert client.post("/free-memory").text == "Could not reach Ollama"
 
 
 def test_delete_current_redirects(
