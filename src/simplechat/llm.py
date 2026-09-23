@@ -1,8 +1,8 @@
 """Talk to Ollama.
 
 Chat goes through the OpenAI-compatible API. Thinking levels and capabilities
-such as vision are only listed by Ollama's native `/api/show`, so that one call
-uses the native API.
+such as vision are only listed by Ollama's native `/api/show`, and loaded models
+can only be listed and unloaded natively, so those calls use the native API.
 """
 
 import time
@@ -15,6 +15,9 @@ from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import ChatCompletionMessageParam
 
 MODEL_CACHE_SECONDS = 30.0
+# Ollama can answer slowly while it loads a model, so unloading waits longer than
+# the 5 s default before giving up.
+UNLOAD_TIMEOUT_SECONDS = 30.0
 
 # Passed as `reasoning_effort` to turn thinking off.
 THINKING_OFF = "none"
@@ -38,10 +41,32 @@ class ModelInfo:
     vision: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class LoadedModel:
+    """A model Ollama holds in memory, with its size in bytes (weights and KV cache)."""
+
+    name: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class UnloadResult:
+    """Models unloaded now, and ones that unload once their current reply finishes."""
+
+    unloaded: list[LoadedModel]
+    pending: list[LoadedModel]
+
+
+class UnloadError(Exception):
+    """Unloading failed; the message says why, in words fit for the user."""
+
+
 class ChatBackend(Protocol):
     async def list_models(self) -> list[str]: ...
 
     async def model_info(self, model: str) -> ModelInfo: ...
+
+    async def unload_models(self) -> UnloadResult: ...
 
     def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
@@ -90,6 +115,41 @@ class OllamaBackend:
             thinking=_thinking_options(info) if "thinking" in capabilities else None,
             vision="vision" in capabilities,
         )
+
+    async def unload_models(self) -> UnloadResult:
+        """Unload every model Ollama has in memory.
+
+        A request with `keep_alive: 0` and no prompt unloads a model. An idle model
+        is gone by the time that request returns, but one still answering another
+        client stays loaded until its reply finishes, so the loaded models are
+        listed again afterwards to tell the two apart.
+        """
+        try:
+            loaded = await self._loaded_models()
+            for model in loaded:
+                unload = await self._native.post(
+                    "/api/generate",
+                    json={"model": model.name, "keep_alive": 0},
+                    timeout=UNLOAD_TIMEOUT_SECONDS,
+                )
+                unload.raise_for_status()
+            still_loaded = {model.name for model in await self._loaded_models()}
+        except httpx2.TimeoutException as e:
+            raise UnloadError("Ollama did not answer in time; it may be loading a model") from e
+        except httpx2.HTTPError as e:
+            raise UnloadError("Could not reach Ollama") from e
+        return UnloadResult(
+            unloaded=[model for model in loaded if model.name not in still_loaded],
+            pending=[model for model in loaded if model.name in still_loaded],
+        )
+
+    async def _loaded_models(self) -> list[LoadedModel]:
+        response = await self._native.get("/api/ps", timeout=UNLOAD_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return [
+            LoadedModel(name=model["name"], size=model.get("size", 0))
+            for model in response.json().get("models") or []
+        ]
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""

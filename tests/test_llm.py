@@ -3,8 +3,16 @@ import json
 from collections.abc import Callable
 
 import httpx2
+import pytest
 
-from simplechat.llm import ModelInfo, OllamaBackend, ThinkingOptions
+from simplechat.llm import (
+    LoadedModel,
+    ModelInfo,
+    OllamaBackend,
+    ThinkingOptions,
+    UnloadError,
+    UnloadResult,
+)
 
 
 def backend_with(handler: Callable[[httpx2.Request], httpx2.Response]) -> OllamaBackend:
@@ -134,3 +142,68 @@ def test_stream_chat_default_thinking_sends_no_effort() -> None:
 
     assert asyncio.run(collect()) == [("content", "hi")]
     assert "reasoning_effort" not in requests[0]
+
+
+def ollama_with_loaded_models(
+    loaded: dict[str, int], busy: set[str], unloads: list[dict[str, object]]
+) -> OllamaBackend:
+    """A fake Ollama: keep_alive 0 unloads an idle model at once, a busy one only later."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/api/ps":
+            # Shaped like a real Ollama 0.34 response, trimmed.
+            models = [{"name": name, "size": size} for name, size in loaded.items()]
+            return httpx2.Response(200, json={"models": models})
+        body = json.loads(request.content)
+        unloads.append(body)
+        if body["model"] not in busy:
+            del loaded[body["model"]]
+        return httpx2.Response(200, json={"model": body["model"], "done_reason": "unload"})
+
+    return backend_with(handler)
+
+
+def test_unload_models_sends_keep_alive_zero_for_each_loaded_model() -> None:
+    unloads: list[dict[str, object]] = []
+    loaded = {"qwen3": 19_704_971_204, "llama3": 4_000_000_000}
+    backend = ollama_with_loaded_models(loaded, busy=set(), unloads=unloads)
+
+    result = asyncio.run(backend.unload_models())
+    assert result == UnloadResult(
+        unloaded=[LoadedModel("qwen3", 19_704_971_204), LoadedModel("llama3", 4_000_000_000)],
+        pending=[],
+    )
+    assert unloads == [
+        {"model": "qwen3", "keep_alive": 0},
+        {"model": "llama3", "keep_alive": 0},
+    ]
+
+
+def test_unload_models_reports_models_still_answering() -> None:
+    loaded = {"qwen3": 19_704_971_204, "llama3": 4_000_000_000}
+    backend = ollama_with_loaded_models(loaded, busy={"llama3"}, unloads=[])
+
+    result = asyncio.run(backend.unload_models())
+    assert result == UnloadResult(
+        unloaded=[LoadedModel("qwen3", 19_704_971_204)],
+        pending=[LoadedModel("llama3", 4_000_000_000)],
+    )
+
+
+def test_unload_models_with_nothing_loaded() -> None:
+    backend = backend_returning({"models": []})
+    assert asyncio.run(backend.unload_models()) == UnloadResult(unloaded=[], pending=[])
+
+
+def test_unload_models_raises_when_ollama_errors() -> None:
+    backend = backend_with(lambda request: httpx2.Response(500, json={"error": "boom"}))
+    with pytest.raises(UnloadError, match="Could not reach Ollama"):
+        asyncio.run(backend.unload_models())
+
+
+def test_unload_models_explains_a_timeout() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ReadTimeout("timed out", request=request)
+
+    with pytest.raises(UnloadError, match="may be loading a model"):
+        asyncio.run(backend_with(handler).unload_models())

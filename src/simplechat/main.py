@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 
 from simplechat.config import Settings
 from simplechat.generation import Generations
-from simplechat.llm import ChatBackend, OllamaBackend
+from simplechat.llm import ChatBackend, LoadedModel, OllamaBackend, UnloadError
 from simplechat.store import BusyError, Conversation, Image, Message, Store
 
 BASE_DIR = Path(__file__).parent
@@ -124,6 +124,11 @@ async def read_images(uploads: list[UploadFile]) -> list[Image]:
     return images
 
 
+def describe_models(models: list[LoadedModel]) -> str:
+    """e.g. "qwen3 (19.7 GB), llama3 (4.2 GB)", with sizes in decimal GB like `ollama ps`."""
+    return ", ".join(f"{model.name} ({model.size / 1e9:.1f} GB)" for model in models)
+
+
 async def ensure_vision(backend: ChatBackend, conversation: Conversation) -> None:
     """Check that the conversation's model can read images.
 
@@ -214,6 +219,33 @@ async def update_settings(
     )
 
 
+@router.post("/free-memory", response_class=HTMLResponse)
+async def free_memory(backend: BackendDep, generations: GenerationsDep) -> HTMLResponse:
+    """Unload every model Ollama has loaded, freeing its weights and KV cache.
+
+    The response is a short status text for the top bar, so every outcome is a
+    200: htmx does not swap error responses, and the user should see why.
+    """
+    # Holding the lock keeps new replies from starting while models are unloaded;
+    # a message sent meanwhile waits and then starts normally.
+    async with generations.lock:
+        if generations.any_running:
+            return HTMLResponse("Wait for the reply to finish")
+        try:
+            result = await backend.unload_models()
+        except UnloadError as e:
+            return HTMLResponse(escape(str(e)))
+    if not result.unloaded and not result.pending:
+        return HTMLResponse("No models were loaded")
+    parts = []
+    if result.unloaded:
+        parts.append(f"Unloaded {describe_models(result.unloaded)}.")
+    if result.pending:
+        # Another client is using them; Ollama unloads them once that reply ends.
+        parts.append(f"{describe_models(result.pending)} will unload after its current reply.")
+    return HTMLResponse(escape(" ".join(parts)))
+
+
 @router.post("/c/{cid}/system-prompt", status_code=204)
 async def update_system_prompt(
     conversation: ConversationDep, system_prompt: Annotated[str, Form()] = ""
@@ -244,16 +276,17 @@ async def send_message(
     attached = await read_images(images or [])
     if not content.strip() and not attached:
         raise HTTPException(422, "Message is empty")
-    if attached:
-        await ensure_vision(backend, conversation)
-        new_bytes = sum(len(image.data) for image in attached)
-        if store.image_bytes() + new_bytes > MAX_STORED_IMAGE_BYTES:
-            raise HTTPException(413, "Image storage is full; delete some chats to free space")
-    try:
-        user, reply = conversation.send(content, attached)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        if attached:
+            await ensure_vision(backend, conversation)
+            new_bytes = sum(len(image.data) for image in attached)
+            if store.image_bytes() + new_bytes > MAX_STORED_IMAGE_BYTES:
+                raise HTTPException(413, "Image storage is full; delete some chats to free space")
+        try:
+            user, reply = conversation.send(content, attached)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        generations.start(backend, conversation, reply)
     return templates.TemplateResponse(
         request,
         "partials/turn.html",
@@ -318,15 +351,16 @@ async def edit_message(
     images = [message.images[i] for i in indexes]
     if not content.strip() and not images:
         raise HTTPException(422, "Message is empty")
-    if images:
-        await ensure_vision(backend, conversation)
-    try:
-        reply = conversation.edit(message.id, content, images)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        if images:
+            await ensure_vision(backend, conversation)
+        try:
+            reply = conversation.edit(message.id, content, images)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 
@@ -338,13 +372,14 @@ async def regenerate_message(
     backend: BackendDep,
     generations: GenerationsDep,
 ) -> HTMLResponse:
-    try:
-        reply = conversation.regenerate(message.id)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        try:
+            reply = conversation.regenerate(message.id)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 

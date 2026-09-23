@@ -179,7 +179,7 @@ function isBusy() {
 
 function syncBusyState() {
   const busy = isBusy();
-  document.querySelectorAll(".msg .actions, .composer .send").forEach((element) => {
+  document.querySelectorAll(".msg .actions, .composer .send, .free-memory").forEach((element) => {
     element.inert = busy;
   });
 }
@@ -252,6 +252,20 @@ promptForm.addEventListener("htmx:afterRequest", (event) => {
 
 // The browser may restore unsaved text on reload.
 syncPromptState();
+
+// --- free memory: the result shows briefly under the top bar ---
+
+const memoryStatus = document.getElementById("memory-status");
+let memoryStatusTimer;
+
+document.querySelector(".free-memory").addEventListener("htmx:afterRequest", (event) => {
+  // The server answers every outcome with a status text; this covers not reaching it.
+  if (!event.detail.successful) memoryStatus.textContent = "Could not reach SimpleChat";
+  clearTimeout(memoryStatusTimer);
+  memoryStatusTimer = setTimeout(() => {
+    memoryStatus.textContent = "";
+  }, 5000);
+});
 
 // --- collapsible sidebar and top bar ---
 

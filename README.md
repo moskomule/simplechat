@@ -9,6 +9,7 @@ A minimal ChatGPT-style chat UI for [Ollama](https://ollama.com), built with Fas
 - Images for vision models: attach them (on phones, from the camera or photo library) or paste them, preview before sending, and drop them when editing a message. PNG, JPEG, WebP or GIF, up to 10 per message and 20 MB each
 - Works on phones: open it from any device on the same network
 - Collapsible chat list and top bar for more room; each browser remembers the choice
+- A "free memory" button in the top bar that unloads every model from Ollama (weights and KV cache), without restarting it. The next message reloads the model, so its first reply is slower
 
 Conversations are kept in memory, so they are lost when the server stops.
 
@@ -48,7 +49,7 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server. Chat uses its OpenAI-compatible API under `/v1`; thinking levels and vision support come from its native `/api/show` |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server. Chat uses its OpenAI-compatible API under `/v1`; thinking levels and vision support come from its native `/api/show`, and "free memory" uses `/api/ps` and `/api/generate` |
 | `OLLAMA_API_KEY` | `ollama` | Ignored by Ollama, but required by the OpenAI client |
 | `DEFAULT_MODEL` | first model Ollama lists | Model for new conversations |
 | `HOST` | `0.0.0.0` | Address to bind; use `127.0.0.1` to keep it local |
