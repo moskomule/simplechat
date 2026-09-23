@@ -206,6 +206,34 @@ button:disabled {
   background: var(--bg);
 }
 
+/* The model and thinking pickers have their own form, but lay out as if they were
+   direct children of .settings, next to the system prompt panel. */
+.pickers {
+  display: contents;
+}
+
+.unsaved-mark {
+  color: var(--accent);
+}
+
+.system-prompt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.system-prompt-actions .action {
+  min-width: 72px;
+  min-height: 40px;
+}
+
+.save-status {
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .scroller {
   flex: 1;
   overflow-y: auto;

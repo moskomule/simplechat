@@ -541,13 +541,50 @@ def test_build_chat_messages_with_images() -> None:
 
 
 def test_update_settings(client: TestClient, conversation: Conversation) -> None:
-    response = client.post(
-        f"/c/{conversation.id}/settings",
-        data={"model": "qwen3", "system_prompt": "Answer in Japanese."},
-    )
+    response = client.post(f"/c/{conversation.id}/settings", data={"model": "qwen3"})
     assert response.status_code == 200
     assert conversation.model == "qwen3"
+
+
+def test_settings_leave_system_prompt_alone(client: TestClient, conversation: Conversation) -> None:
+    # The system prompt is saved only with its own Save button.
+    conversation.system_prompt = "Be brief."
+    client.post(
+        f"/c/{conversation.id}/settings",
+        data={"model": "qwen3", "thinking": "low", "system_prompt": "Ignored."},
+    )
+    assert conversation.system_prompt == "Be brief."
+
+
+def test_save_system_prompt(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    response = client.post(
+        f"/c/{conversation.id}/system-prompt", data={"system_prompt": "Answer in Japanese."}
+    )
+    assert response.status_code == 204
     assert conversation.system_prompt == "Answer in Japanese."
+
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    stream(client, conversation, conversation.active_path()[1].id)
+    assert backend.calls[-1][1][0] == {"role": "system", "content": "Answer in Japanese."}
+
+    # An empty prompt clears it.
+    response = client.post(f"/c/{conversation.id}/system-prompt", data={"system_prompt": ""})
+    assert response.status_code == 204
+    assert conversation.system_prompt == ""
+
+
+def test_system_prompt_has_its_own_form(client: TestClient, conversation: Conversation) -> None:
+    conversation.system_prompt = "Be brief."
+    page = client.get(f"/c/{conversation.id}").text
+    settings_form = re.search(r'<form class="pickers".*?</form>', page, re.S)
+    prompt_form = re.search(r'<form class="system-prompt-form".*?</form>', page, re.S)
+    assert settings_form and prompt_form
+    assert "system_prompt" not in settings_form[0]
+    assert f'hx-post="/c/{conversation.id}/system-prompt"' in prompt_form[0]
+    assert ">Be brief.</textarea>" in prompt_form[0]
+    assert '<button class="action primary" type="submit" disabled>Save</button>' in prompt_form[0]
 
 
 def test_delete_current_redirects(

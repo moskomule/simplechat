@@ -196,7 +196,6 @@ async def update_settings(
     backend: BackendDep,
     model: Annotated[str, Form()] = "",
     thinking: Annotated[str, Form()] = "",
-    system_prompt: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     """Save the settings and return the thinking picker, whose levels depend on the model.
 
@@ -204,7 +203,6 @@ async def update_settings(
     """
     if model:
         conversation.model = model
-    conversation.system_prompt = system_prompt
     info = await backend.model_info(conversation.model)
     options = info.thinking
     # A level picked for the previous model may not exist for this one.
@@ -214,6 +212,19 @@ async def update_settings(
         "partials/model_controls.html",
         {"conversation": conversation, "thinking_options": options, "vision": info.vision},
     )
+
+
+@router.post("/c/{cid}/system-prompt", status_code=204)
+async def update_system_prompt(
+    conversation: ConversationDep, system_prompt: Annotated[str, Form()] = ""
+) -> Response:
+    """Save the system prompt; an empty one clears it.
+
+    Nothing is re-rendered, so the textarea keeps its focus and cursor. app.js shows
+    "Saved" when the request succeeds.
+    """
+    conversation.system_prompt = system_prompt
+    return Response(status_code=204)
 
 
 # --- messages ---

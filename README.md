@@ -4,7 +4,7 @@ A minimal ChatGPT-style chat UI for [Ollama](https://ollama.com), built with Fas
 
 - Streaming replies (Server-Sent Events)
 - Edit your messages and regenerate replies; every version is kept and you can switch between them with ‹ 1/2 ›
-- Model picker and a system prompt for each conversation
+- Model picker and a system prompt for each conversation; the system prompt is saved with its Save button (or Ctrl/Cmd+Enter)
 - Thinking level for models that can think (e.g. off, low, medium, high), with the model's thoughts shown in a collapsible section
 - Images for vision models: attach them (on phones, from the camera or photo library) or paste them, preview before sending, and drop them when editing a message. PNG, JPEG, WebP or GIF, up to 10 per message and 20 MB each
 - Works on phones: open it from any device on the same network

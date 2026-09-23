@@ -189,6 +189,63 @@ function syncBusyState() {
 document.body.addEventListener("htmx:afterSettle", syncBusyState);
 syncBusyState();
 
+// --- system prompt: saved only with the Save button or Ctrl/Cmd+Enter ---
+
+// The textarea's defaultValue (its server-rendered text) is the saved prompt, so
+// "unsaved" means the value differs from it. The textarea is never swapped out,
+// which keeps the panel open and the cursor in place.
+
+const promptForm = document.getElementById("system-prompt-form");
+const promptInput = promptForm.querySelector("textarea");
+const promptSave = promptForm.querySelector("button[type=submit]");
+const promptStatus = promptForm.querySelector(".save-status");
+const promptUnsavedMark = document.querySelector(".system-prompt .unsaved-mark");
+let sentPrompt = "";
+let promptStatusTimer;
+
+function showPromptStatus(text, clearAfterMs = 0) {
+  clearTimeout(promptStatusTimer);
+  promptStatus.textContent = text;
+  if (clearAfterMs) promptStatusTimer = setTimeout(() => showPromptStatus(""), clearAfterMs);
+}
+
+function syncPromptState() {
+  const unsaved = promptInput.value !== promptInput.defaultValue;
+  promptSave.disabled = !unsaved;
+  promptUnsavedMark.hidden = !unsaved;
+}
+
+promptInput.addEventListener("input", () => {
+  showPromptStatus("");
+  syncPromptState();
+});
+
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+    event.preventDefault();
+    if (!promptSave.disabled) promptForm.requestSubmit();
+  }
+});
+
+promptForm.addEventListener("htmx:beforeRequest", () => {
+  sentPrompt = promptInput.value;
+  promptSave.disabled = true; // no double saves; typing re-enables it
+});
+
+promptForm.addEventListener("htmx:afterRequest", (event) => {
+  if (event.detail.successful) {
+    // The user may have kept typing, so the sent text, not the current one, is saved.
+    promptInput.defaultValue = sentPrompt;
+    if (promptInput.value === sentPrompt) showPromptStatus("Saved", 2000);
+  } else {
+    showPromptStatus("Not saved");
+  }
+  syncPromptState();
+});
+
+// The browser may restore unsaved text on reload.
+syncPromptState();
+
 // --- sidebar drawer on small screens ---
 
 document.querySelectorAll("[data-sidebar-toggle]").forEach((element) => {
