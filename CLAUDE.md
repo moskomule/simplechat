@@ -44,12 +44,20 @@ Edit, regenerate and switch return the whole `#thread` (`partials/thread.html`),
 
 Jinja is configured with `trim_blocks` and `lstrip_blocks`. The `.content` and `.thinking-content` divs must keep their `{{ … }}` on one line, because CSS uses `white-space: pre-wrap` (there is no Markdown rendering).
 
+### Images
+
+- User messages keep images in memory as `Message.images` (`store.Image`: bytes plus media type). `GET /c/{cid}/messages/{mid}/images/{i}` serves them with a long `immutable` cache header, because a message's images never change (an edit creates a new message). Never inline `data:` URLs in HTML, since the thread is re-rendered often.
+- The composer posts `multipart/form-data`. `read_images` in `main.py` checks type, count and size, and must run before the busy check because it awaits. It skips the empty part a browser sends for an empty file input. Images for a model without `vision` get a 400.
+- The attach button (`partials/attach_button.html`) shows only for vision models. The settings route swaps it out of band next to the thinking picker (`partials/model_controls.html`).
+- `app.js` keeps the selected files in an array and writes them back to the hidden file input with a `DataTransfer`, so the normal htmx submit sends them. The edit form sends a `keep` index per image. Removing an image's element drops that index.
+- `build_chat_messages` sends a message with images as OpenAI content parts: `image_url` parts with `data:` URLs, then a text part. Messages without images keep plain string content.
+
 ### Ollama backend (`llm.py`)
 
 `ChatBackend` is a Protocol. Routes get it from `app.state` through dependencies, and tests inject `FakeBackend` (`tests/test_routes.py`) or an `httpx2.MockTransport` (`tests/test_llm.py`). `create_app()` is a factory that takes `settings`, `backend` and `store`, and it creates the `Generations` registry. `run()` starts uvicorn with `factory=True`.
 
 Ollama specifics that the code depends on:
-- Chat uses the OpenAI-compatible API at `{OLLAMA_URL}/v1`. Thinking levels come only from the native `POST /api/show`, which is why the setting is the server root rather than the `/v1` URL.
+- Chat uses the OpenAI-compatible API at `{OLLAMA_URL}/v1`. Thinking levels and capabilities come only from the native `POST /api/show`, which is why the setting is the server root rather than the `/v1` URL. `model_info()` reads both in one call: `capabilities` (e.g. `["completion", "vision", "thinking"]`) gives `ModelInfo.vision`.
 - `/api/show` returns `thinking.values` like `[false, "low", "medium", "high"]`. `false` is mapped to `"none"`, which turns thinking off. The level is sent as `extra_body={"reasoning_effort": ...}`, because level names are model-defined, and it's omitted for the model's default.
 - Thinking text streams in the non-standard `delta.reasoning` field. It is stored in `Message.thinking` and never sent back as history.
 - `/v1/models` returns `"data": null` when no model is pulled.
