@@ -115,6 +115,29 @@ def test_chat_page_renders(client: TestClient, conversation: Conversation) -> No
     assert '<option value="qwen3">qwen3</option>' in response.text
 
 
+def test_chat_page_has_bar_toggles(client: TestClient, conversation: Conversation) -> None:
+    page = client.get(f"/c/{conversation.id}").text
+    # The remembered collapsed state is applied in <head>, before the first paint.
+    head = page.split("</head>", 1)[0]
+    assert "localStorage.getItem(`simplechat:${state}`)" in head
+    assert '"sidebar-collapsed", "topbar-hidden"' in head
+
+    sidebar_toggles = re.findall(r"<button[^>]*data-sidebar-toggle[^>]*>", page)
+    topbar_toggles = re.findall(r"<button[^>]*data-topbar-toggle[^>]*>", page)
+    assert len(sidebar_toggles) == 3  # close in the sidebar, open in the top bar, floating open
+    assert len(topbar_toggles) == 2  # hide in the top bar, floating show
+    for button in sidebar_toggles:
+        assert 'aria-controls="sidebar"' in button
+        assert re.search(r'aria-label="(Open|Close) chat list"', button)
+        assert "aria-expanded=" in button
+    for button in topbar_toggles:
+        assert 'aria-controls="topbar"' in button
+        assert re.search(r'aria-label="(Show|Hide) top bar"', button)
+        assert "aria-expanded=" in button
+    assert 'id="sidebar"' in page
+    assert 'id="topbar"' in page
+
+
 def test_unknown_conversation_is_404(client: TestClient) -> None:
     assert client.get("/c/nope").status_code == 404
 

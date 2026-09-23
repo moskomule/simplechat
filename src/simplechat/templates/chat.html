@@ -1,3 +1,4 @@
+{% import "partials/icons.html" as icons %}
 <!doctype html>
 <html lang="en">
 <head>
@@ -5,26 +6,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <title>{{ conversation.title }} · SimpleChat</title>
+  <script>
+    // Apply the remembered collapsed bars before the first paint (see app.js).
+    try {
+      for (const state of ["sidebar-collapsed", "topbar-hidden"]) {
+        if (localStorage.getItem(`simplechat:${state}`)) document.documentElement.classList.add(state);
+      }
+    } catch {}
+  </script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/sse.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  {#
+    The sidebar and top bar toggles ([data-sidebar-toggle], [data-topbar-toggle])
+    are shown only while they can act (see style.css); app.js keeps aria-expanded
+    in sync.
+  #}
   <div class="app">
-    <aside class="sidebar">
-      <form method="post" action="/c">
-        <button class="new-chat" type="submit">+ New chat</button>
-      </form>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <form method="post" action="/c">
+          <button class="new-chat" type="submit">+ New chat</button>
+        </form>
+        <button class="icon-button bar-toggle" type="button" aria-label="Close chat list" title="Close chat list"
+                aria-controls="sidebar" aria-expanded="true" data-sidebar-toggle>{{ icons.panel_left_close() }}</button>
+      </div>
       {% with current_id = conversation.id %}{% include "partials/sidebar.html" %}{% endwith %}
     </aside>
     <div class="backdrop" data-sidebar-toggle></div>
 
     <main class="chat">
-      <header class="topbar">
-        <button class="icon-button menu-toggle" type="button" aria-label="Open chat list" data-sidebar-toggle>☰</button>
+      <header class="topbar" id="topbar">
+        <button class="icon-button bar-toggle sidebar-opener" type="button" aria-label="Open chat list" title="Open chat list"
+                aria-controls="sidebar" aria-expanded="false" data-sidebar-toggle>{{ icons.panel_left_open() }}</button>
         {% include "partials/settings.html" %}
+        <button class="icon-button bar-toggle" type="button" aria-label="Hide top bar" title="Hide top bar"
+                aria-controls="topbar" aria-expanded="true" data-topbar-toggle>{{ icons.panel_top_close() }}</button>
       </header>
+      {# Stand-ins for the top bar's buttons while it is hidden. #}
+      <button class="icon-button floating-toggle sidebar-opener" type="button" aria-label="Open chat list" title="Open chat list"
+              aria-controls="sidebar" aria-expanded="false" data-sidebar-toggle>{{ icons.panel_left_open() }}</button>
+      <button class="icon-button floating-toggle topbar-opener" type="button" aria-label="Show top bar" title="Show top bar"
+              aria-controls="topbar" aria-expanded="false" data-topbar-toggle>{{ icons.panel_top_open() }}</button>
 
       <div class="scroller" id="scroller">
         <div class="thread" id="thread">
