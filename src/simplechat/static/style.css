@@ -10,6 +10,8 @@
   --danger: #dc2626;
   --radius: 18px;
   --content-width: 48rem;
+  /* How long the sidebar takes to slide in or out. */
+  --slide: 0.2s;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -73,6 +75,16 @@ button:disabled {
   overflow-y: auto;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-head form {
+  flex: 1;
 }
 
 .new-chat {
@@ -147,6 +159,7 @@ button:disabled {
 /* --- main column --- */
 
 .chat {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -159,12 +172,6 @@ button:disabled {
   gap: 8px;
   padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
   border-bottom: 1px solid var(--border);
-}
-
-.menu-toggle {
-  display: none;
-  min-width: 44px;
-  min-height: 44px;
 }
 
 .settings {
@@ -258,6 +265,74 @@ button:disabled {
 
 .empty:not(:only-child) {
   display: none;
+}
+
+/* --- collapsible bars --- */
+
+/*
+  `sidebar-collapsed` and `topbar-hidden` are classes on <html>, set by the script
+  in chat.html's <head> and by app.js. Each toggle is shown only while it can act.
+  Hidden bars use `display: none` or `visibility: hidden`, so the keyboard cannot
+  reach them.
+*/
+
+.bar-toggle {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.sidebar-opener,
+.floating-toggle {
+  display: none;
+}
+
+/* Stand-ins for the top bar's buttons while it is hidden: small, in the corners. */
+.floating-toggle {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  z-index: 5;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.floating-toggle.sidebar-opener {
+  left: calc(12px + env(safe-area-inset-left));
+}
+
+.topbar-opener {
+  right: calc(12px + env(safe-area-inset-right));
+}
+
+.topbar-hidden .topbar {
+  display: none;
+}
+
+.topbar-hidden .topbar-opener {
+  display: inline-flex;
+}
+
+/* Start the thread below the floating buttons. */
+.topbar-hidden .thread {
+  padding-top: calc(52px + env(safe-area-inset-top));
+}
+
+/* On wide screens the sidebar collapses; on small ones it is a drawer (below). */
+@media (min-width: 768px) {
+  .sidebar {
+    transition: margin-left var(--slide) ease;
+  }
+
+  .sidebar-collapsed .sidebar {
+    margin-left: -260px;
+    visibility: hidden;
+    /* Hide only after sliding out; it shows at once when opened, so it can take focus. */
+    transition: margin-left var(--slide) ease, visibility 0s var(--slide);
+  }
+
+  .sidebar-collapsed .topbar .sidebar-opener,
+  .sidebar-collapsed.topbar-hidden .floating-toggle.sidebar-opener {
+    display: inline-flex;
+  }
 }
 
 /* --- messages --- */
@@ -509,8 +584,9 @@ button:disabled {
 /* --- small screens: the sidebar becomes a drawer --- */
 
 @media (max-width: 767px) {
-  .menu-toggle {
-    display: block;
+  .topbar .sidebar-opener,
+  .topbar-hidden .floating-toggle.sidebar-opener {
+    display: inline-flex;
   }
 
   .sidebar {
@@ -519,11 +595,14 @@ button:disabled {
     z-index: 20;
     width: min(80vw, 300px);
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
+    visibility: hidden;
+    transition: transform var(--slide) ease, visibility 0s var(--slide);
   }
 
   .sidebar-open .sidebar {
     transform: none;
+    visibility: visible;
+    transition: transform var(--slide) ease;
   }
 
   .sidebar-open .backdrop {
@@ -536,5 +615,11 @@ button:disabled {
 
   .msg.user .bubble {
     max-width: 90%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --slide: 0s;
   }
 }
