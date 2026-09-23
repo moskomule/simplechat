@@ -28,6 +28,12 @@ document.body.addEventListener("htmx:afterSwap", (event) => {
   }
 });
 
+// The thread's viewport shrinks when the composer grows (longer text, image
+// previews) or the top bar opens a panel; stay at the bottom if we were there.
+new ResizeObserver(() => {
+  if (stickToBottom) scrollToBottom();
+}).observe(scroller);
+
 scrollToBottom();
 
 // --- composer: auto-grow, and Enter to send on devices with a keyboard ---
