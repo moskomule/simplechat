@@ -1,3 +1,4 @@
+{% import "partials/icons.html" as icons %}
 {% set base = "/c/" ~ conversation.id ~ "/messages/" ~ message.id %}
 {% set index, total = conversation.version(message.id) %}
 <article class="msg {{ message.role }} {{ message.status }}" id="m-{{ message.id }}"
@@ -30,11 +31,12 @@
     </div>
     {% endif %}
     {% if message.role == "user" %}
-    <button class="action" type="button" hx-get="{{ base }}/edit" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">Edit</button>
+    <button class="icon-button" type="button" aria-label="Edit" title="Edit"
+            hx-get="{{ base }}/edit" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">{{ icons.edit() }}</button>
     {% else %}
-    <button class="action" type="button" hx-post="{{ base }}/regenerate" hx-target="#thread">
-      {{- "Retry" if message.status == "error" else "Regenerate" -}}
-    </button>
+    {% set label = "Retry" if message.status == "error" else "Regenerate" %}
+    <button class="icon-button" type="button" aria-label="{{ label }}" title="{{ label }}"
+            hx-post="{{ base }}/regenerate" hx-target="#thread">{{ icons.regenerate() }}</button>
     {% endif %}
   </div>
   {% endif %}
