@@ -52,6 +52,8 @@ class FakeBackend:
         self.loaded: list[LoadedModel] = []
         self.busy: set[str] = set()
         self.unload_fails = False
+        # Set to False to hold unload_models until set back to True.
+        self.unload_released = True
 
     async def list_models(self) -> list[str]:
         return ["llama3", "qwen3"]
@@ -62,6 +64,8 @@ class FakeBackend:
     async def unload_models(self) -> UnloadResult:
         if self.unload_fails:
             raise UnloadError("Could not reach Ollama")
+        while not self.unload_released:
+            await asyncio.sleep(0.005)
         result = UnloadResult(
             unloaded=[model for model in self.loaded if model.name not in self.busy],
             pending=[model for model in self.loaded if model.name in self.busy],
@@ -673,6 +677,27 @@ def test_free_memory_waits_for_a_running_reply(
     backend.released = True
     assert response.text == "Wait for the reply to finish"
     assert backend.loaded == [LoadedModel("llama3", 1)]
+
+
+def test_message_sent_while_freeing_memory_waits(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.loaded = [LoadedModel("llama3", 1_000_000_000)]
+    backend.unload_released = False
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        freeing = pool.submit(client.post, "/free-memory")
+        time.sleep(0.1)  # unloading is now waiting on "Ollama"
+        sending = pool.submit(client.post, f"/c/{conversation.id}/messages", data={"content": "Hi"})
+        time.sleep(0.1)
+        # The reply must not start while models are being unloaded.
+        started_early = sending.done() or backend.calls != []
+        # Release before asserting, so a failure can't leave the pool waiting forever.
+        backend.unload_released = True
+        assert not started_early
+        assert freeing.result(timeout=5).text == "Unloaded llama3 (1.0 GB)."
+        assert sending.result(timeout=5).status_code == 200
+    stream(client, conversation, conversation.active_path()[1].id)
+    assert len(backend.calls) == 1
 
 
 def test_free_memory_reports_ollama_errors(client: TestClient, backend: FakeBackend) -> None:

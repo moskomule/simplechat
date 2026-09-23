@@ -226,12 +226,15 @@ async def free_memory(backend: BackendDep, generations: GenerationsDep) -> HTMLR
     The response is a short status text for the top bar, so every outcome is a
     200: htmx does not swap error responses, and the user should see why.
     """
-    if generations.any_running:
-        return HTMLResponse("Wait for the reply to finish")
-    try:
-        result = await backend.unload_models()
-    except UnloadError as e:
-        return HTMLResponse(escape(str(e)))
+    # Holding the lock keeps new replies from starting while models are unloaded;
+    # a message sent meanwhile waits and then starts normally.
+    async with generations.lock:
+        if generations.any_running:
+            return HTMLResponse("Wait for the reply to finish")
+        try:
+            result = await backend.unload_models()
+        except UnloadError as e:
+            return HTMLResponse(escape(str(e)))
     if not result.unloaded and not result.pending:
         return HTMLResponse("No models were loaded")
     parts = []
@@ -273,16 +276,17 @@ async def send_message(
     attached = await read_images(images or [])
     if not content.strip() and not attached:
         raise HTTPException(422, "Message is empty")
-    if attached:
-        await ensure_vision(backend, conversation)
-        new_bytes = sum(len(image.data) for image in attached)
-        if store.image_bytes() + new_bytes > MAX_STORED_IMAGE_BYTES:
-            raise HTTPException(413, "Image storage is full; delete some chats to free space")
-    try:
-        user, reply = conversation.send(content, attached)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        if attached:
+            await ensure_vision(backend, conversation)
+            new_bytes = sum(len(image.data) for image in attached)
+            if store.image_bytes() + new_bytes > MAX_STORED_IMAGE_BYTES:
+                raise HTTPException(413, "Image storage is full; delete some chats to free space")
+        try:
+            user, reply = conversation.send(content, attached)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        generations.start(backend, conversation, reply)
     return templates.TemplateResponse(
         request,
         "partials/turn.html",
@@ -347,15 +351,16 @@ async def edit_message(
     images = [message.images[i] for i in indexes]
     if not content.strip() and not images:
         raise HTTPException(422, "Message is empty")
-    if images:
-        await ensure_vision(backend, conversation)
-    try:
-        reply = conversation.edit(message.id, content, images)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        if images:
+            await ensure_vision(backend, conversation)
+        try:
+            reply = conversation.edit(message.id, content, images)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 
@@ -367,13 +372,14 @@ async def regenerate_message(
     backend: BackendDep,
     generations: GenerationsDep,
 ) -> HTMLResponse:
-    try:
-        reply = conversation.regenerate(message.id)
-    except BusyError as e:
-        raise HTTPException(409, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    generations.start(backend, conversation, reply)
+    async with generations.lock:
+        try:
+            reply = conversation.regenerate(message.id)
+        except BusyError as e:
+            raise HTTPException(409, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        generations.start(backend, conversation, reply)
     return render_thread(request, conversation)
 
 

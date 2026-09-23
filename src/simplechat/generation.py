@@ -58,6 +58,10 @@ class Generations:
 
     def __init__(self) -> None:
         self._running: dict[str, Generation] = {}
+        # Held while a route starts a generation, and while models are being
+        # unloaded, so the two never overlap. Both steps await, so a check such as
+        # `any_running` alone could be outdated by the time the other finishes.
+        self.lock = asyncio.Lock()
 
     def get(self, message_id: str) -> Generation | None:
         return self._running.get(message_id)
