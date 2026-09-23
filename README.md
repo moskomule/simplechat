@@ -95,7 +95,7 @@ Environment variables. `--host` and `--port` take precedence over `HOST` and `PO
 
 | Variable | Default | Description |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama server |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server **root**, not its `/v1` URL. Chat uses the OpenAI-compatible API under `/v1`; thinking levels, vision support and freeing memory use Ollama's native API at the root |
 | `DEFAULT_MODEL` | first model Ollama lists | Model for new chats |
 | `HOST` | `0.0.0.0` | Address to bind; `127.0.0.1` keeps it local |
 | `PORT` | `8000` | Port to listen on |
