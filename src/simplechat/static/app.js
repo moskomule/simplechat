@@ -200,6 +200,9 @@ const promptInput = promptForm.querySelector("textarea");
 const promptSave = promptForm.querySelector("button[type=submit]");
 const promptStatus = promptForm.querySelector(".save-status");
 const promptUnsavedMark = document.querySelector(".system-prompt .unsaved-mark");
+// One save at a time: while one is in flight, Save stays disabled even if the user
+// keeps typing, so `sentPrompt` always belongs to the request that is answering.
+let saving = false;
 let sentPrompt = "";
 let promptStatusTimer;
 
@@ -211,7 +214,7 @@ function showPromptStatus(text, clearAfterMs = 0) {
 
 function syncPromptState() {
   const unsaved = promptInput.value !== promptInput.defaultValue;
-  promptSave.disabled = !unsaved;
+  promptSave.disabled = saving || !unsaved;
   promptUnsavedMark.hidden = !unsaved;
 }
 
@@ -231,10 +234,12 @@ promptForm.addEventListener("htmx:beforeRequest", () => {
   sentPrompt = promptInput.value;
   // Disabling a focused button drops focus to <body>, so go back to the text first.
   if (document.activeElement === promptSave) promptInput.focus();
-  promptSave.disabled = true; // no double saves; typing re-enables it
+  saving = true;
+  syncPromptState();
 });
 
 promptForm.addEventListener("htmx:afterRequest", (event) => {
+  saving = false;
   if (event.detail.successful) {
     // The user may have kept typing, so the sent text, not the current one, is saved.
     promptInput.defaultValue = sentPrompt;
