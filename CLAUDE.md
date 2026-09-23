@@ -47,7 +47,8 @@ Jinja is configured with `trim_blocks` and `lstrip_blocks`. The `.content` and `
 ### Images
 
 - User messages keep images in memory as `Message.images` (`store.Image`: bytes plus media type). `GET /c/{cid}/messages/{mid}/images/{i}` serves them with a long `immutable` cache header, because a message's images never change (an edit creates a new message). Never inline `data:` URLs in HTML, since the thread is re-rendered often.
-- The composer posts `multipart/form-data`. `read_images` in `main.py` checks type, count and size, and must run before the busy check because it awaits. It skips the empty part a browser sends for an empty file input. Images for a model without `vision` get a 400.
+- The composer posts `multipart/form-data`. `read_images` in `main.py` checks type, count and size, and must run before the busy check because it awaits. It skips the empty part a browser sends for an empty file input. Images for a model without `vision` get a 400. `ensure_vision` awaits `/api/show`, and the model can change meanwhile, so it refuses (409) if the model changed during the check. Call it last before the mutation.
+- Images stay in memory until their chat is deleted, so `MAX_STORED_IMAGE_BYTES` caps the total across all chats (413 when full). `Store.image_bytes()` counts images shared between an original and its edit only once.
 - The attach button (`partials/attach_button.html`) shows only for vision models. The settings route swaps it out of band next to the thinking picker (`partials/model_controls.html`).
 - `app.js` keeps the selected files in an array and writes them back to the hidden file input with a `DataTransfer`, so the normal htmx submit sends them. The edit form sends a `keep` index per image. Removing an image's element drops that index.
 - `build_chat_messages` sends a message with images as OpenAI content parts: `image_url` parts with `data:` URLs, then a text part. Messages without images keep plain string content.

@@ -191,3 +191,17 @@ class Store:
 
     def recent(self) -> list[Conversation]:
         return sorted(self._conversations.values(), key=lambda c: c.updated_at, reverse=True)
+
+    def image_bytes(self) -> int:
+        """Memory held by images in all conversations.
+
+        An edited message shares its kept images with the original, so each image
+        is counted once.
+        """
+        images = {
+            id(image): image
+            for conversation in self._conversations.values()
+            for message in conversation.messages.values()
+            for image in message.images
+        }
+        return sum(len(image.data) for image in images.values())

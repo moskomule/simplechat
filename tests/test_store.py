@@ -1,6 +1,6 @@
 import pytest
 
-from simplechat.store import BusyError, Conversation, Message, Store
+from simplechat.store import BusyError, Conversation, Image, Message, Store
 
 
 def finish(message: Message, content: str) -> None:
@@ -101,3 +101,16 @@ def test_store_recent_orders_by_update() -> None:
     assert store.recent() == [first, second]
     store.delete(first.id)
     assert store.recent() == [second]
+
+
+def test_image_bytes_counts_shared_images_once() -> None:
+    store = Store()
+    conversation = store.create("m")
+    image = Image(data=b"12345", media_type="image/png")
+    user, reply = conversation.send("look", [image])
+    finish(reply, "ok")
+    # An edit that keeps the image shares it with the original message.
+    conversation.edit(user.id, "look again", [image])
+    assert store.image_bytes() == 5
+    store.delete(conversation.id)
+    assert store.image_bytes() == 0

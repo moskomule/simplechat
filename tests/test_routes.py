@@ -457,6 +457,40 @@ def test_images_need_a_vision_model(client: TestClient, conversation: Conversati
     assert conversation.active_path() == []
 
 
+def test_model_switch_during_vision_check_is_refused(
+    client: TestClient, vision_conversation: Conversation, backend: FakeBackend
+) -> None:
+    check_model = backend.model_info
+
+    async def switch_while_checking(model: str) -> ModelInfo:
+        info = await check_model(model)
+        vision_conversation.model = "llama3"  # another request switches the model meanwhile
+        return info
+
+    backend.model_info = switch_while_checking  # type: ignore[method-assign]
+    response = client.post(
+        f"/c/{vision_conversation.id}/messages", data={"content": "Hi"}, files=[image()]
+    )
+    assert response.status_code == 409
+    assert vision_conversation.active_path() == []
+
+
+def test_image_storage_is_capped(
+    client: TestClient, vision_conversation: Conversation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("simplechat.main.MAX_STORED_IMAGE_BYTES", 2 * len(PNG))
+    url = f"/c/{vision_conversation.id}/messages"
+
+    assert client.post(url, files=[image(), image()]).status_code == 200
+    stream(client, vision_conversation, vision_conversation.active_path()[1].id)
+
+    response = client.post(url, files=[image()])
+    assert response.status_code == 413
+    assert "delete some chats" in response.text
+    # Text-only messages still work when image storage is full.
+    assert client.post(url, data={"content": "Hi"}).status_code == 200
+
+
 def test_edit_drops_an_image(client: TestClient, vision_conversation: Conversation) -> None:
     conversation = vision_conversation
     base = f"/c/{conversation.id}/messages"

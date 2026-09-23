@@ -34,6 +34,8 @@ BASE_DIR = Path(__file__).parent
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 20 * 2**20
+# Images live in memory until their chat is deleted, so cap the total.
+MAX_STORED_IMAGE_BYTES = 2**30
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.trim_blocks = True
 templates.env.lstrip_blocks = True
@@ -123,8 +125,16 @@ async def read_images(uploads: list[UploadFile]) -> list[Image]:
 
 
 async def ensure_vision(backend: ChatBackend, conversation: Conversation) -> None:
-    if not (await backend.model_info(conversation.model)).vision:
-        raise HTTPException(400, f"{conversation.model or 'This model'} cannot read images")
+    """Check that the conversation's model can read images.
+
+    Call it last before the mutation. Another request can switch the model while
+    this awaits, so a model that changed in the meantime is refused, not trusted.
+    """
+    model = conversation.model
+    if not (await backend.model_info(model)).vision:
+        raise HTTPException(400, f"{model or 'This model'} cannot read images")
+    if conversation.model != model:
+        raise HTTPException(409, "The model was changed while sending; please try again")
 
 
 # --- pages ---
@@ -225,6 +235,9 @@ async def send_message(
         raise HTTPException(422, "Message is empty")
     if attached:
         await ensure_vision(backend, conversation)
+        new_bytes = sum(len(image.data) for image in attached)
+        if store.image_bytes() + new_bytes > MAX_STORED_IMAGE_BYTES:
+            raise HTTPException(413, "Image storage is full; delete some chats to free space")
     try:
         user, reply = conversation.send(content, attached)
     except BusyError as e:
