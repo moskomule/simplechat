@@ -1,13 +1,14 @@
 """Talk to Ollama.
 
-Chat goes through the OpenAI-compatible API. Thinking levels are only listed
-by Ollama's native `/api/show`, so that one call uses the native API.
+Chat goes through the OpenAI-compatible API. Thinking levels and capabilities
+such as vision are only listed by Ollama's native `/api/show`, so that one call
+uses the native API.
 """
 
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx2
 from openai import AsyncOpenAI, OpenAIError
@@ -29,10 +30,18 @@ class ThinkingOptions:
     default: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ModelInfo:
+    """What a model supports: thinking levels (None if it cannot think) and images."""
+
+    thinking: ThinkingOptions | None = None
+    vision: bool = False
+
+
 class ChatBackend(Protocol):
     async def list_models(self) -> list[str]: ...
 
-    async def thinking_options(self, model: str) -> ThinkingOptions | None: ...
+    async def model_info(self, model: str) -> ModelInfo: ...
 
     def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
@@ -65,27 +74,21 @@ class OllamaBackend:
         self._models_fetched_at = time.monotonic()
         return self._models
 
-    async def thinking_options(self, model: str) -> ThinkingOptions | None:
-        """Return the model's thinking levels, or None if it cannot think."""
+    async def model_info(self, model: str) -> ModelInfo:
+        """Return what the model supports; nothing if it is unknown or Ollama errors."""
         if not model:
-            return None
+            return ModelInfo()
         try:
             response = await self._native.post("/api/show", json={"model": model})
             response.raise_for_status()
         except httpx2.HTTPError:
-            return None
+            return ModelInfo()
         info = response.json()
-        if "thinking" not in info.get("capabilities", []):
-            return None
-        # e.g. {"values": [false, "low", "medium", "high"], "default": "medium"}.
-        # `false` means thinking can be turned off. `true` (on/off-only models) is
-        # left out, since leaving the level at the default already turns it on.
-        spec = info.get("thinking") or {}
-        levels = [_level_name(v) for v in spec.get("values", [False]) if v is not True]
-        default = spec.get("default")
-        return ThinkingOptions(
-            levels=levels,
-            default=_level_name(default) if isinstance(default, str | bool) else None,
+        # e.g. ["completion", "vision", "tools", "thinking"]
+        capabilities = info.get("capabilities") or []
+        return ModelInfo(
+            thinking=_thinking_options(info) if "thinking" in capabilities else None,
+            vision="vision" in capabilities,
         )
 
     async def stream_chat(
@@ -93,7 +96,7 @@ class OllamaBackend:
     ) -> AsyncIterator[tuple[ChunkKind, str]]:
         """Yield ("thinking", text) and ("content", text) chunks as they arrive.
 
-        `thinking` is a level from `thinking_options`; empty means the model's default.
+        `thinking` is a level from `model_info`; empty means the model's default.
         """
         stream = await self._client.chat.completions.create(
             model=model,
@@ -112,6 +115,19 @@ class OllamaBackend:
                 yield "thinking", reasoning
             if delta.content:
                 yield "content", delta.content
+
+
+def _thinking_options(info: dict[str, Any]) -> ThinkingOptions:
+    # e.g. {"values": [false, "low", "medium", "high"], "default": "medium"}.
+    # `false` means thinking can be turned off. `true` (on/off-only models) is
+    # left out, since leaving the level at the default already turns it on.
+    spec = info.get("thinking") or {}
+    levels = [_level_name(v) for v in spec.get("values", [False]) if v is not True]
+    default = spec.get("default")
+    return ThinkingOptions(
+        levels=levels,
+        default=_level_name(default) if isinstance(default, str | bool) else None,
+    )
 
 
 def _level_name(value: str | bool) -> str:

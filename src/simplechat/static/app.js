@@ -56,6 +56,112 @@ composer.addEventListener("reset", () => {
   requestAnimationFrame(resizeInput);
 });
 
+// --- composer: attach images from the picker or by pasting (vision models only) ---
+
+// The selected files live in `attachments`. After every change they are written
+// back to the file input with a DataTransfer, so the normal htmx submit sends them.
+// The limits match the server's, which checks them again.
+
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const MAX_IMAGES = 10;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+const fileInput = document.getElementById("attach-input");
+const previews = document.getElementById("attachments");
+let attachments = [];
+
+// The attach button is replaced out of band when the model changes, so look it up each time.
+function canAttach() {
+  const button = document.getElementById("attach-button");
+  return button !== null && !button.hidden;
+}
+
+function addAttachments(files) {
+  const problems = [];
+  for (const file of files) {
+    if (!IMAGE_TYPES.includes(file.type)) {
+      problems.push(`${file.name}: only PNG, JPEG, WebP and GIF images can be sent.`);
+    } else if (file.size > MAX_IMAGE_BYTES) {
+      problems.push(`${file.name}: images must be 20 MB or smaller.`);
+    } else if (attachments.length >= MAX_IMAGES) {
+      problems.push(`${file.name}: at most ${MAX_IMAGES} images can be sent at once.`);
+    } else {
+      attachments.push(file);
+    }
+  }
+  if (problems.length > 0) alert(problems.join("\n"));
+  renderAttachments();
+}
+
+function renderAttachments() {
+  const transfer = new DataTransfer();
+  attachments.forEach((file) => transfer.items.add(file));
+  fileInput.files = transfer.files;
+  // Images alone make a valid message.
+  input.required = attachments.length === 0;
+
+  previews.querySelectorAll("img").forEach((image) => URL.revokeObjectURL(image.src));
+  previews.replaceChildren(...attachments.map(attachmentPreview));
+}
+
+function attachmentPreview(file, index) {
+  const image = document.createElement("img");
+  image.src = URL.createObjectURL(file);
+  image.alt = file.name;
+
+  const remove = document.createElement("button");
+  remove.className = "remove-image";
+  remove.type = "button";
+  remove.setAttribute("aria-label", `Remove ${file.name}`);
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    attachments.splice(index, 1);
+    renderAttachments();
+  });
+
+  const item = document.createElement("div");
+  item.className = "attachment";
+  item.append(image, remove);
+  return item;
+}
+
+document.body.addEventListener("click", (event) => {
+  if (event.target.closest("#attach-button")) fileInput.click();
+});
+
+fileInput.addEventListener("change", () => addAttachments([...fileInput.files]));
+
+input.addEventListener("paste", (event) => {
+  const images = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
+  if (images.length === 0 || !canAttach()) return;
+  event.preventDefault();
+  addAttachments(images);
+});
+
+// Cleared after a successful send (the form is reset on htmx:afterRequest).
+composer.addEventListener("reset", () => {
+  attachments = [];
+  renderAttachments();
+});
+
+// Switching to a model without vision hides the button and drops the selection.
+document.body.addEventListener("htmx:afterSettle", () => {
+  if (attachments.length > 0 && !canAttach()) {
+    attachments = [];
+    renderAttachments();
+  }
+});
+
+// --- edit form: × drops an image; the text may be empty while images remain ---
+
+document.body.addEventListener("click", (event) => {
+  const remove = event.target.closest(".edit-form .remove-image");
+  if (!remove) return;
+  const form = remove.closest(".edit-form");
+  remove.closest(".attachment").remove();
+  form.querySelector("textarea").required = form.querySelector(".attachment") === null;
+});
+
 // --- no new requests while a reply is being generated ---
 
 // The server refuses them anyway (409); this keeps the controls from looking or

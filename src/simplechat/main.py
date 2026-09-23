@@ -8,7 +8,17 @@ from pathlib import Path
 from typing import Annotated
 
 import uvicorn
-from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
@@ -17,9 +27,13 @@ from fastapi.templating import Jinja2Templates
 from simplechat.config import Settings
 from simplechat.generation import Generations
 from simplechat.llm import ChatBackend, OllamaBackend
-from simplechat.store import BusyError, Conversation, Message, Store
+from simplechat.store import BusyError, Conversation, Image, Message, Store
 
 BASE_DIR = Path(__file__).parent
+# Image types that Ollama's vision models read, and limits per message.
+IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MAX_IMAGES = 10
+MAX_IMAGE_BYTES = 20 * 2**20
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.trim_blocks = True
 templates.env.lstrip_blocks = True
@@ -91,6 +105,28 @@ def render_thread(request: Request, conversation: Conversation) -> HTMLResponse:
     )
 
 
+async def read_images(uploads: list[UploadFile]) -> list[Image]:
+    """Check and read uploaded images. Call before any busy check, since it awaits."""
+    # Skip the empty part a browser sends for a file input with nothing selected.
+    uploads = [upload for upload in uploads if upload.filename or upload.size]
+    if len(uploads) > MAX_IMAGES:
+        raise HTTPException(400, f"At most {MAX_IMAGES} images can be sent at once")
+    images: list[Image] = []
+    for upload in uploads:
+        if upload.content_type not in IMAGE_TYPES:
+            raise HTTPException(400, "Images must be PNG, JPEG, WebP or GIF")
+        # The size is known once the form is parsed, before reading into memory.
+        if upload.size is None or upload.size > MAX_IMAGE_BYTES:
+            raise HTTPException(413, f"Images must be {MAX_IMAGE_BYTES // 2**20} MB or smaller")
+        images.append(Image(data=await upload.read(), media_type=upload.content_type))
+    return images
+
+
+async def ensure_vision(backend: ChatBackend, conversation: Conversation) -> None:
+    if not (await backend.model_info(conversation.model)).vision:
+        raise HTTPException(400, f"{conversation.model or 'This model'} cannot read images")
+
+
 # --- pages ---
 
 
@@ -115,6 +151,7 @@ async def create_conversation(
 async def show_conversation(
     request: Request, conversation: ConversationDep, store: StoreDep, backend: BackendDep
 ) -> HTMLResponse:
+    info = await backend.model_info(conversation.model)
     return templates.TemplateResponse(
         request,
         "chat.html",
@@ -122,7 +159,8 @@ async def show_conversation(
             "conversation": conversation,
             "conversations": store.recent(),
             "models": await backend.list_models(),
-            "thinking_options": await backend.thinking_options(conversation.model),
+            "thinking_options": info.thinking,
+            "vision": info.vision,
         },
     )
 
@@ -150,17 +188,21 @@ async def update_settings(
     thinking: Annotated[str, Form()] = "",
     system_prompt: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
-    """Save the settings and return the thinking picker, whose levels depend on the model."""
+    """Save the settings and return the thinking picker, whose levels depend on the model.
+
+    The attach button, shown only for vision models, is swapped in out of band.
+    """
     if model:
         conversation.model = model
     conversation.system_prompt = system_prompt
-    options = await backend.thinking_options(conversation.model)
+    info = await backend.model_info(conversation.model)
+    options = info.thinking
     # A level picked for the previous model may not exist for this one.
     conversation.thinking = thinking if options and thinking in options.levels else ""
     return templates.TemplateResponse(
         request,
-        "partials/thinking_select.html",
-        {"conversation": conversation, "thinking_options": options},
+        "partials/model_controls.html",
+        {"conversation": conversation, "thinking_options": options, "vision": info.vision},
     )
 
 
@@ -174,12 +216,17 @@ async def send_message(
     store: StoreDep,
     backend: BackendDep,
     generations: GenerationsDep,
-    content: Annotated[str, Form()],
+    content: Annotated[str, Form()] = "",
+    images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> HTMLResponse:
-    if not content.strip():
+    # Everything that awaits happens before `send`, which checks for a running reply.
+    attached = await read_images(images or [])
+    if not content.strip() and not attached:
         raise HTTPException(422, "Message is empty")
+    if attached:
+        await ensure_vision(backend, conversation)
     try:
-        user, reply = conversation.send(content)
+        user, reply = conversation.send(content, attached)
     except BusyError as e:
         raise HTTPException(409, str(e)) from e
     generations.start(backend, conversation, reply)
@@ -214,6 +261,22 @@ async def edit_form(
     )
 
 
+@router.get("/c/{cid}/messages/{mid}/images/{index}")
+async def show_image(message: MessageDep, index: int) -> Response:
+    if not 0 <= index < len(message.images):
+        raise HTTPException(404, "Image not found")
+    image = message.images[index]
+    # A message's images never change: editing creates a new message.
+    return Response(
+        image.data,
+        media_type=image.media_type,
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.post("/c/{cid}/messages/{mid}/edit", response_class=HTMLResponse)
 async def edit_message(
     request: Request,
@@ -221,12 +284,20 @@ async def edit_message(
     message: MessageDep,
     backend: BackendDep,
     generations: GenerationsDep,
-    content: Annotated[str, Form()],
+    content: Annotated[str, Form()] = "",
+    keep: Annotated[list[int] | None, Form()] = None,
 ) -> HTMLResponse:
-    if not content.strip():
+    """Add an edited version; `keep` lists the indexes of the images still attached."""
+    indexes = sorted(set(keep or []))
+    if not all(0 <= i < len(message.images) for i in indexes):
+        raise HTTPException(400, "Image not found")
+    images = [message.images[i] for i in indexes]
+    if not content.strip() and not images:
         raise HTTPException(422, "Message is empty")
+    if images:
+        await ensure_vision(backend, conversation)
     try:
-        reply = conversation.edit(message.id, content)
+        reply = conversation.edit(message.id, content, images)
     except BusyError as e:
         raise HTTPException(409, str(e)) from e
     except ValueError as e:

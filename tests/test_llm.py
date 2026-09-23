@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import httpx2
 
-from simplechat.llm import OllamaBackend, ThinkingOptions
+from simplechat.llm import ModelInfo, OllamaBackend, ThinkingOptions
 
 
 def backend_with(handler: Callable[[httpx2.Request], httpx2.Response]) -> OllamaBackend:
@@ -33,15 +33,16 @@ def test_list_models_when_none_pulled() -> None:
     assert asyncio.run(backend.list_models()) == []
 
 
-def test_thinking_options_from_api_show() -> None:
+def test_model_info_from_api_show() -> None:
     backend = backend_returning(
         {
-            "capabilities": ["completion", "thinking"],
+            "capabilities": ["completion", "vision", "tools", "thinking"],
             "thinking": {"values": [False, "low", "medium", "xhigh"], "default": "medium"},
         }
     )
-    assert asyncio.run(backend.thinking_options("qwen")) == ThinkingOptions(
-        levels=["none", "low", "medium", "xhigh"], default="medium"
+    assert asyncio.run(backend.model_info("qwen")) == ModelInfo(
+        thinking=ThinkingOptions(levels=["none", "low", "medium", "xhigh"], default="medium"),
+        vision=True,
     )
 
 
@@ -49,26 +50,31 @@ def test_thinking_options_on_off_only() -> None:
     backend = backend_returning(
         {"capabilities": ["thinking"], "thinking": {"values": [False, True], "default": True}}
     )
-    assert asyncio.run(backend.thinking_options("m")) == ThinkingOptions(
+    assert asyncio.run(backend.model_info("m")).thinking == ThinkingOptions(
         levels=["none"], default="on"
     )
 
 
 def test_thinking_options_without_metadata_can_still_turn_off() -> None:
     backend = backend_returning({"capabilities": ["completion", "thinking"]})
-    assert asyncio.run(backend.thinking_options("m")) == ThinkingOptions(
+    assert asyncio.run(backend.model_info("m")).thinking == ThinkingOptions(
         levels=["none"], default=None
     )
 
 
-def test_no_thinking_options_for_non_thinking_model() -> None:
+def test_model_info_for_text_only_model() -> None:
     backend = backend_returning({"capabilities": ["completion"]})
-    assert asyncio.run(backend.thinking_options("m")) is None
+    assert asyncio.run(backend.model_info("m")) == ModelInfo(thinking=None, vision=False)
 
 
-def test_no_thinking_options_when_ollama_errors() -> None:
+def test_model_info_for_vision_model_without_thinking() -> None:
+    backend = backend_returning({"capabilities": ["completion", "vision"]})
+    assert asyncio.run(backend.model_info("m")) == ModelInfo(thinking=None, vision=True)
+
+
+def test_empty_model_info_when_ollama_errors() -> None:
     backend = backend_with(lambda request: httpx2.Response(404, json={"error": "not found"}))
-    assert asyncio.run(backend.thinking_options("m")) is None
+    assert asyncio.run(backend.model_info("m")) == ModelInfo()
 
 
 def sse(*deltas: dict[str, str]) -> bytes:

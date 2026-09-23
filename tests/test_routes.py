@@ -10,9 +10,10 @@ from openai import APIConnectionError
 from openai.types.chat import ChatCompletionMessageParam
 
 from simplechat.config import Settings
-from simplechat.llm import ChunkKind, ThinkingOptions
+from simplechat.generation import build_chat_messages
+from simplechat.llm import ChunkKind, ModelInfo, ThinkingOptions
 from simplechat.main import create_app
-from simplechat.store import Conversation, Store
+from simplechat.store import Conversation, Image, Store
 
 SETTINGS = Settings(
     ollama_url="http://unused",
@@ -22,7 +23,7 @@ SETTINGS = Settings(
     port=8000,
 )
 
-# llama3 cannot think; qwen3 can.
+# llama3 cannot think or read images; qwen3 can do both.
 QWEN_THINKING = ThinkingOptions(levels=["none", "low", "high"], default="high")
 
 
@@ -43,8 +44,8 @@ class FakeBackend:
     async def list_models(self) -> list[str]:
         return ["llama3", "qwen3"]
 
-    async def thinking_options(self, model: str) -> ThinkingOptions | None:
-        return QWEN_THINKING if model == "qwen3" else None
+    async def model_info(self, model: str) -> ModelInfo:
+        return ModelInfo(thinking=QWEN_THINKING, vision=True) if model == "qwen3" else ModelInfo()
 
     async def stream_chat(
         self, model: str, messages: list[ChatCompletionMessageParam], thinking: str = ""
@@ -189,7 +190,7 @@ def test_thinking_picker_follows_model(client: TestClient, conversation: Convers
         f"/c/{conversation.id}/settings", data={"model": "llama3", "thinking": "none"}
     )
     assert conversation.thinking == ""
-    assert "hidden" in response.text
+    assert 'id="thinking-select" aria-label="Thinking level" hidden' in response.text
 
 
 def test_thinking_level_is_sent(
@@ -328,6 +329,181 @@ def test_regenerate_user_message_is_400(client: TestClient, conversation: Conver
     stream(client, conversation, reply.id)
     response = client.post(f"/c/{conversation.id}/messages/{user.id}/regenerate")
     assert response.status_code == 400
+
+
+# The server does not decode images, so any bytes do.
+PNG = b"\x89PNG\r\n\x1a\nred"
+JPEG = b"\xff\xd8\xffblue"
+
+
+def image(name: str = "red.png", data: bytes = PNG, media_type: str = "image/png") -> tuple:
+    return ("images", (name, data, media_type))
+
+
+@pytest.fixture
+def vision_conversation(conversation: Conversation) -> Conversation:
+    conversation.model = "qwen3"
+    return conversation
+
+
+def attach_button_hidden(html: str) -> bool:
+    match = re.search(r'<button[^>]*id="attach-button"[^>]*>', html)
+    assert match is not None
+    return " hidden" in match.group()
+
+
+def test_attach_button_follows_model(client: TestClient, conversation: Conversation) -> None:
+    assert attach_button_hidden(client.get(f"/c/{conversation.id}").text)
+
+    response = client.post(f"/c/{conversation.id}/settings", data={"model": "qwen3"})
+    assert 'id="thinking-select"' in response.text
+    assert 'hx-swap-oob="true"' in response.text
+    assert not attach_button_hidden(response.text)
+
+    response = client.post(f"/c/{conversation.id}/settings", data={"model": "llama3"})
+    assert attach_button_hidden(response.text)
+
+
+def test_send_images_renders_serves_and_prompts(
+    client: TestClient, vision_conversation: Conversation, backend: FakeBackend
+) -> None:
+    conversation = vision_conversation
+    response = client.post(
+        f"/c/{conversation.id}/messages",
+        data={"content": "What <color>?"},
+        files=[image(), image("blue.jpg", JPEG, "image/jpeg")],
+    )
+    assert response.status_code == 200
+    user, reply = conversation.active_path()
+    assert user.images == [Image(PNG, "image/png"), Image(JPEG, "image/jpeg")]
+    base = f"/c/{conversation.id}/messages/{user.id}/images"
+    assert f'<a href="{base}/0" target="_blank" rel="noopener"><img src="{base}/0"' in response.text
+    assert f'src="{base}/1"' in response.text
+    assert "What &lt;color&gt;?" in response.text
+
+    served = client.get(f"{base}/1")
+    assert served.status_code == 200
+    assert served.content == JPEG
+    assert served.headers["content-type"] == "image/jpeg"
+    assert "immutable" in served.headers["cache-control"]
+    assert client.get(f"{base}/2").status_code == 404
+
+    stream(client, conversation, reply.id)
+    _, messages, _ = backend.calls[0]
+    assert messages[0]["content"][0]["type"] == "image_url"  # type: ignore[index]
+
+
+def test_send_image_only(client: TestClient, vision_conversation: Conversation) -> None:
+    conversation = vision_conversation
+    response = client.post(f"/c/{conversation.id}/messages", files=[image()])
+    assert response.status_code == 200
+    user = conversation.active_path()[0]
+    assert user.content == ""
+    assert len(user.images) == 1
+
+
+def test_empty_file_input_is_ignored(client: TestClient, conversation: Conversation) -> None:
+    # A browser sends a file input with nothing selected as a part with an empty
+    # filename. httpx leaves out an empty filename, so write the body by hand.
+    def post(content: str) -> int:
+        body = (
+            f'--b\r\nContent-Disposition: form-data; name="content"\r\n\r\n{content}\r\n'
+            '--b\r\nContent-Disposition: form-data; name="images"; filename=""\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n\r\n--b--\r\n"
+        )
+        response = client.post(
+            f"/c/{conversation.id}/messages",
+            content=body.encode(),
+            headers={"content-type": "multipart/form-data; boundary=b"},
+        )
+        return response.status_code
+
+    assert post(" ") == 422
+    # Not an image, so text goes through even to a model without vision.
+    assert post("Hi") == 200
+    assert conversation.active_path()[0].images == []
+
+
+@pytest.mark.parametrize(
+    ("files", "status"),
+    [
+        ([image("x.svg", b"<svg/>", "image/svg+xml")], 400),
+        ([image()] * 11, 400),
+        ([image("big.png", b"x" * 11)], 413),
+    ],
+    ids=["type", "count", "size"],
+)
+def test_invalid_images_are_rejected(
+    client: TestClient,
+    vision_conversation: Conversation,
+    monkeypatch: pytest.MonkeyPatch,
+    files: list[tuple],
+    status: int,
+) -> None:
+    monkeypatch.setattr("simplechat.main.MAX_IMAGE_BYTES", 10)
+    response = client.post(
+        f"/c/{vision_conversation.id}/messages", data={"content": "Hi"}, files=files
+    )
+    assert response.status_code == status
+    assert vision_conversation.active_path() == []
+
+
+def test_images_need_a_vision_model(client: TestClient, conversation: Conversation) -> None:
+    response = client.post(
+        f"/c/{conversation.id}/messages", data={"content": "Hi"}, files=[image()]
+    )
+    assert response.status_code == 400
+    assert "cannot read images" in response.text
+    assert conversation.active_path() == []
+
+
+def test_edit_drops_an_image(client: TestClient, vision_conversation: Conversation) -> None:
+    conversation = vision_conversation
+    base = f"/c/{conversation.id}/messages"
+    client.post(
+        base, data={"content": "Compare"}, files=[image(), image("b.jpg", JPEG, "image/jpeg")]
+    )
+    user, reply = conversation.active_path()
+    stream(client, conversation, reply.id)
+
+    form = client.get(f"{base}/{user.id}/edit")
+    assert '<input type="hidden" name="keep" value="1">' in form.text
+    # The text may be emptied while images remain.
+    assert "required" not in form.text
+
+    assert client.post(f"{base}/{user.id}/edit", data={"keep": ["5"]}).status_code == 400
+    assert client.post(f"{base}/{user.id}/edit", data={"content": " "}).status_code == 422
+
+    response = client.post(f"{base}/{user.id}/edit", data={"content": "", "keep": ["1"]})
+    assert response.status_code == 200
+    new_user = conversation.active_path()[0]
+    assert new_user.id != user.id
+    assert new_user.content == ""
+    assert new_user.images == [Image(JPEG, "image/jpeg")]
+    assert len(user.images) == 2
+    assert f"{base}/{new_user.id}/images/0" in response.text
+
+
+def test_build_chat_messages_with_images() -> None:
+    conversation = Conversation(model="m")
+    _, reply = conversation.send("What color?", [Image(PNG, "image/png")])
+    reply.content, reply.status = "Red.", "done"
+    _, next_reply = conversation.send("Thanks")
+    assert build_chat_messages(conversation, next_reply) == [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,iVBORw0KGgpyZWQ="},
+                },
+                {"type": "text", "text": "What color?"},
+            ],
+        },
+        {"role": "assistant", "content": "Red."},
+        # Messages without images keep plain string content.
+        {"role": "user", "content": "Thanks"},
+    ]
 
 
 def test_update_settings(client: TestClient, conversation: Conversation) -> None:

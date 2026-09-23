@@ -1,7 +1,19 @@
 {% set base = "/c/" ~ conversation.id ~ "/messages/" ~ message.id %}
 <article class="msg user editing" id="m-{{ message.id }}">
   <form class="edit-form" hx-post="{{ base }}/edit" hx-target="#thread">
-    <textarea name="content" rows="3" aria-label="Edit message" required autofocus>{{ message.content }}</textarea>
+    {% if message.images %}
+    {# Removing an image's element (app.js) drops its index from `keep`. #}
+    <div class="attachments">
+      {% for image in message.images %}
+      <div class="attachment">
+        <img src="{{ base }}/images/{{ loop.index0 }}" alt="Image {{ loop.index }}">
+        <input type="hidden" name="keep" value="{{ loop.index0 }}">
+        <button class="remove-image" type="button" aria-label="Remove image {{ loop.index }}">×</button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <textarea name="content" rows="3" aria-label="Edit message"{% if not message.images %} required{% endif %} autofocus>{{ message.content }}</textarea>
     <div class="edit-actions">
       <button class="action" type="button" hx-get="{{ base }}" hx-target="#m-{{ message.id }}" hx-swap="outerHTML">Cancel</button>
       <button class="action primary" type="submit">Send</button>

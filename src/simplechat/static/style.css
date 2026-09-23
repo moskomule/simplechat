@@ -354,6 +354,67 @@ button:disabled {
   gap: 8px;
 }
 
+/* --- images: thumbnails in user messages, and attachments in the composer and edit form --- */
+
+.images,
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.images {
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.images img,
+.attachment img {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+/* An image-only message has no text. */
+.msg.user .content:empty {
+  display: none;
+}
+
+.msg.user .images:has(+ .content:empty) {
+  margin-bottom: 0;
+}
+
+.attachments:empty {
+  display: none;
+}
+
+.attachment {
+  position: relative;
+}
+
+.attachment img {
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--border);
+}
+
+.remove-image {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 14px;
+  line-height: 1;
+}
+
 /* app.js makes these inert while a reply is being generated. */
 :is(.actions, .send)[inert] {
   opacity: 0.4;
@@ -363,12 +424,29 @@ button:disabled {
 
 .composer {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   width: 100%;
   max-width: var(--content-width);
   margin: 0 auto;
   padding: 8px 16px calc(12px + env(safe-area-inset-bottom));
+}
+
+/* A row of its own above the text box; it is empty (hidden) until images are picked. */
+.composer .attachments {
+  flex-basis: 100%;
+  padding: 8px 8px 0;
+}
+
+.attach {
+  flex: 0 0 44px;
+  height: 44px;
+}
+
+/* .icon-button's display would otherwise override the hidden attribute. */
+.attach[hidden] {
+  display: none;
 }
 
 .composer textarea {
