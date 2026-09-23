@@ -6,13 +6,14 @@ keep receiving chunks until the reply finishes.
 """
 
 import asyncio
+import base64
 from collections.abc import AsyncIterator
 
 from openai import OpenAIError
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionContentPartParam, ChatCompletionMessageParam
 
 from simplechat.llm import ChatBackend, ChunkKind
-from simplechat.store import Conversation, Message
+from simplechat.store import Conversation, Image, Message
 
 
 class Generation:
@@ -110,7 +111,23 @@ def build_chat_messages(
         messages.append({"role": "system", "content": conversation.system_prompt})
     for message in conversation.ancestors(reply.id):
         if message.role == "user":
-            messages.append({"role": "user", "content": message.content})
+            messages.append({"role": "user", "content": _user_content(message)})
         else:
             messages.append({"role": "assistant", "content": message.content})
     return messages
+
+
+def _user_content(message: Message) -> str | list[ChatCompletionContentPartParam]:
+    """Plain text, or image parts followed by a text part when there are images."""
+    if not message.images:
+        return message.content
+    parts: list[ChatCompletionContentPartParam] = [
+        {"type": "image_url", "image_url": {"url": _data_url(image)}} for image in message.images
+    ]
+    if message.content:
+        parts.append({"type": "text", "text": message.content})
+    return parts
+
+
+def _data_url(image: Image) -> str:
+    return f"data:{image.media_type};base64,{base64.b64encode(image.data).decode()}"

@@ -1,0 +1,4 @@
+{% import "partials/icons.html" as icons %}
+{# Only vision models take images. app.js opens the file picker and clears attachments when hidden. #}
+<button class="icon-button attach" id="attach-button" type="button" aria-label="Attach images" title="Attach images"
+        {%- if not vision %} hidden{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>{{ icons.image_plus() }}</button>

@@ -8,6 +8,7 @@ is shown, and following it from the root gives the active path.
 
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -26,10 +27,19 @@ class BusyError(Exception):
     """Raised when changing a conversation while a reply is being generated."""
 
 
+@dataclass(frozen=True, slots=True)
+class Image:
+    """An image attached to a user message."""
+
+    data: bytes
+    media_type: str
+
+
 @dataclass(slots=True)
 class Message:
     role: Role
     content: str = ""
+    images: list[Image] = field(default_factory=list)
     thinking: str = ""
     parent_id: str | None = None
     status: Status = "done"
@@ -94,22 +104,22 @@ class Conversation:
 
     # --- mutations ---
 
-    def send(self, content: str) -> tuple[Message, Message]:
+    def send(self, content: str, images: Sequence[Image] = ()) -> tuple[Message, Message]:
         """Append a user message and a pending assistant reply to the active path."""
         self._ensure_idle()
         path = self.active_path()
         parent_id = path[-1].id if path else self.root_id
-        user = self._add_child(parent_id, "user", content)
+        user = self._add_child(parent_id, "user", content, images=images)
         if self.title == DEFAULT_TITLE:
             self.title = _make_title(content)
         return user, self._add_child(user.id, "assistant", status="pending")
 
-    def edit(self, message_id: str, content: str) -> Message:
+    def edit(self, message_id: str, content: str, images: Sequence[Image] = ()) -> Message:
         """Add an edited version of a user message and return its pending reply."""
         self._ensure_idle()
         original = self._get(message_id, "user")
         assert original.parent_id is not None
-        user = self._add_child(original.parent_id, "user", content)
+        user = self._add_child(original.parent_id, "user", content, images=images)
         return self._add_child(user.id, "assistant", status="pending")
 
     def regenerate(self, message_id: str) -> Message:
@@ -129,10 +139,17 @@ class Conversation:
         parent.active_child = max(0, min(index, len(parent.children) - 1))
 
     def _add_child(
-        self, parent_id: str, role: Role, content: str = "", status: Status = "done"
+        self,
+        parent_id: str,
+        role: Role,
+        content: str = "",
+        status: Status = "done",
+        images: Sequence[Image] = (),
     ) -> Message:
         parent = self.messages[parent_id]
-        child = Message(role=role, content=content, parent_id=parent_id, status=status)
+        child = Message(
+            role=role, content=content, images=list(images), parent_id=parent_id, status=status
+        )
         self.messages[child.id] = child
         parent.children.append(child.id)
         parent.active_child = len(parent.children) - 1
@@ -174,3 +191,17 @@ class Store:
 
     def recent(self) -> list[Conversation]:
         return sorted(self._conversations.values(), key=lambda c: c.updated_at, reverse=True)
+
+    def image_bytes(self) -> int:
+        """Memory held by images in all conversations.
+
+        An edited message shares its kept images with the original, so each image
+        is counted once.
+        """
+        images = {
+            id(image): image
+            for conversation in self._conversations.values()
+            for message in conversation.messages.values()
+            for image in message.images
+        }
+        return sum(len(image.data) for image in images.values())

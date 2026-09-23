@@ -19,6 +19,14 @@
     </details>
     <div class="content" sse-swap="content" hx-swap="beforeend"></div>
     {% else %}
+    {% if message.images %}
+    <div class="images">
+      {% for image in message.images %}
+      {% set url = base ~ "/images/" ~ loop.index0 %}
+      <a href="{{ url }}" target="_blank" rel="noopener"><img src="{{ url }}" alt="Image {{ loop.index }}"></a>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if message.thinking %}
     <details class="thinking">
       <summary>Thoughts</summary>
