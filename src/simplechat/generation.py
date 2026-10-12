@@ -37,8 +37,12 @@ class Generation:
         self._changed.set()
         self._changed = asyncio.Event()
 
-    async def follow(self) -> AsyncIterator[tuple[ChunkKind, str]]:
-        """Yield every chunk from the start, then new ones until the reply finishes."""
+    async def follow(self) -> AsyncIterator[list[tuple[ChunkKind, str]]]:
+        """Yield every chunk from the start, then new ones until the reply finishes.
+
+        Chunks come in batches: everything added since the previous batch, so a
+        follower that falls behind (or joins late) catches up in one step.
+        """
         index = 0
         while True:
             # Take the event before reading the chunks, so a chunk added in
@@ -46,8 +50,8 @@ class Generation:
             changed = self._changed
             new = self.chunks[index:]
             index += len(new)
-            for chunk in new:
-                yield chunk
+            if new:
+                yield new
             if index == len(self.chunks):
                 if self.finished:
                     return

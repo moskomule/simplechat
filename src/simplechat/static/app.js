@@ -182,6 +182,37 @@ document.body.addEventListener("click", (event) => {
   form.querySelector("textarea").required = form.querySelector(".attachment") === null;
 });
 
+// --- code blocks in replies: Copy copies the code ---
+
+// navigator.clipboard only exists in secure contexts (HTTPS or localhost), not
+// when a phone opens the LAN address over HTTP. There, copy from a hidden textarea.
+function copyText(text) {
+  if (navigator.clipboard) return navigator.clipboard.writeText(text);
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  return copied ? Promise.resolve() : Promise.reject(new Error("copy failed"));
+}
+
+document.body.addEventListener("click", (event) => {
+  const button = event.target.closest(".copy-code");
+  if (!button) return;
+  const code = button.closest(".code-block").querySelector("code").textContent;
+  copyText(code).then(
+    () => (button.textContent = "Copied"),
+    () => (button.textContent = "Copy failed"),
+  );
+  setTimeout(() => {
+    button.textContent = "Copy";
+  }, 2000);
+});
+
 // --- no new requests while a reply is being generated ---
 
 // The server refuses them anyway (409); this keeps the controls from looking or

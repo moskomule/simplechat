@@ -1,6 +1,7 @@
 """A ChatGPT-style chat UI for Ollama."""
 
 import argparse
+import asyncio
 import socket
 from collections.abc import AsyncIterator
 from html import escape
@@ -27,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 from simplechat.config import Settings
 from simplechat.generation import Generations
 from simplechat.llm import ChatBackend, LoadedModel, OllamaBackend, UnloadError
+from simplechat.markdown import render_markdown
 from simplechat.store import BusyError, Conversation, Image, Message, Store
 
 BASE_DIR = Path(__file__).parent
@@ -36,9 +38,12 @@ MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 20 * 2**20
 # Images live in memory until their chat is deleted, so cap the total.
 MAX_STORED_IMAGE_BYTES = 2**30
+# A streaming reply is re-rendered as Markdown at most this often, in seconds.
+RENDER_INTERVAL = 0.1
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.trim_blocks = True
 templates.env.lstrip_blocks = True
+templates.env.filters["markdown"] = render_markdown
 router = APIRouter()
 
 # Every route and store-reading dependency is `async def` on purpose: FastAPI runs
@@ -419,10 +424,24 @@ async def stream_reply(
     Every client (a reconnect, a reload, a second device) replays the chunks from
     the start and then follows along, so `done` is only sent once the reply is
     really finished. A reply that has already finished gets `done` right away.
+
+    Thinking is plain text, so its chunks are appended as they come. The content is
+    Markdown, whose meaning can change with later text (a table, a closing fence),
+    so each `content` event carries the whole reply so far, rendered, to replace
+    the old one.
     """
     if (generation := generations.get(message.id)) is not None:
-        async for kind, text in generation.follow():
-            yield ServerSentEvent(event=kind, raw_data=escape(text))
+        content = ""
+        async for chunks in generation.follow():
+            thinking = "".join(text for kind, text in chunks if kind == "thinking")
+            if thinking:
+                yield ServerSentEvent(event="thinking", raw_data=escape(thinking))
+            if new_content := "".join(text for kind, text in chunks if kind == "content"):
+                content += new_content
+                yield ServerSentEvent(event="content", raw_data=render_markdown(content))
+            # Re-rendering on every token would cost CPU and bandwidth that grow
+            # with the reply; chunks that arrive meanwhile come as one batch.
+            await asyncio.sleep(RENDER_INTERVAL)
     html = templates.get_template("partials/message.html").render(
         conversation=conversation, message=message
     )

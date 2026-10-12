@@ -38,6 +38,7 @@ One `uv run`, then chat from your laptop, or from your phone on the same Wi-Fi.
 
 ## Features
 
+- 📝 **Markdown replies:** headings, lists, tables and code blocks with a Copy button, formatted as the reply streams in.
 - 🌿 **Edit and regenerate without losing anything.** Every version is kept; switch between them with ‹ 1 / 2 ›.
 - 🧠 **Thinking models:** pick the thinking level for each chat (off, low, medium, high, as the model allows), and read the model's thoughts in a collapsible section.
 - 🖼️ **Images for vision models:** attach them (on a phone, straight from the camera) or paste them, preview them before sending, and drop them when editing.

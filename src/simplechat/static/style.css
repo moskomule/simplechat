@@ -387,7 +387,136 @@ button:disabled {
 
 .content {
   overflow-wrap: anywhere;
+}
+
+/* User messages are plain text, shown exactly as typed. */
+.content:not(.markdown) {
   white-space: pre-wrap;
+}
+
+/* --- Markdown in replies --- */
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown :is(p, ul, ol, blockquote, table, .code-block) {
+  margin: 0 0 12px;
+}
+
+.markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 20px 0 8px;
+  line-height: 1.3;
+}
+
+.markdown h1 {
+  font-size: 1.5em;
+}
+
+.markdown h2 {
+  font-size: 1.3em;
+}
+
+.markdown :is(h3, h4, h5, h6) {
+  font-size: 1.1em;
+}
+
+.markdown :is(ul, ol) {
+  padding-left: 1.6em;
+}
+
+.markdown li > :is(ul, ol) {
+  margin-bottom: 0;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.markdown hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: var(--surface);
+  font: 0.9em/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.markdown pre {
+  margin: 0;
+  padding: 12px;
+  /* Long lines scroll instead of wrapping, so the code keeps its shape. */
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  overflow-wrap: normal;
+}
+
+/* Wide tables scroll sideways instead of widening the thread. */
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.markdown :is(th, td) {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  overflow-wrap: normal;
+}
+
+.markdown th {
+  background: var(--surface);
+}
+
+.code-block {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sidebar-bg);
+}
+
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.copy-code {
+  min-height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+}
+
+.copy-code:hover {
+  background: var(--surface);
+  color: var(--fg);
 }
 
 .thinking {

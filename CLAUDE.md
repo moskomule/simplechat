@@ -34,16 +34,23 @@ Conversations are in-memory `Conversation` objects, so everything is lost on res
 
 1. A route that creates a reply (send, edit or regenerate) calls `Generations.start()`. That runs the model call as a background `asyncio` task, **not tied to any request**: it keeps going if every client disconnects, and it writes into the `Message` as chunks arrive.
 2. The route returns HTML containing the busy assistant `<article>`. Only in that state does it carry `hx-ext="sse" sse-connect=".../stream/{mid}"`. A busy message renders **empty**, because the stream replays everything generated so far.
-3. `GET /c/{cid}/stream/{mid}` follows the running `Generation`: it replays all chunks from the start, then yields new ones as `thinking` and `content` events with HTML-escaped text. `sse-swap` appends them with `beforeend`. Any number of clients (a reconnect, a reload, a second device) can follow the same generation, and the model is called only once.
+3. `GET /c/{cid}/stream/{mid}` follows the running `Generation`. `follow()` yields batches: first every chunk so far, then whatever arrived since the last batch. Each batch becomes at most one `thinking` event (HTML-escaped text, appended with `beforeend`) and one `content` event, which carries the **whole reply so far rendered as Markdown** and replaces the old one with `innerHTML`, since later text can change how earlier text renders. The route sleeps `RENDER_INTERVAL` between batches, so a long reply isn't re-rendered on every token. Any number of clients (a reconnect, a reload, a second device) can follow the same generation, and the model is called only once.
 4. Only after the generation finishes does the stream send `done`, whose data is the whole re-rendered, finished message. The article is replaced via `sse-swap="done" hx-swap="outerHTML"`, and `sse-close="done"` stops the stream. A reply that already finished gets `done` right away. `done` must never carry a busy message, or the client would reconnect in a loop.
 5. The stream endpoint must always answer 200 and end with `done`. The htmx SSE extension retries forever on error responses.
 6. **Stop** (`POST /c/{cid}/stop` → `Generations.stop()`) cancels the task and keeps the text so far. Cleanup (status, `_running`, `finish()`) lives in the task's done-callback `_finish`, not in a `finally`: a task stopped before it starts never runs its body. Cancelling only stops Ollama if the HTTP stream is closed, so `stream_chat` closes it with `async with stream` and `_run` wraps the chunks in `aclosing()`.
 
-In tests, the `client` fixture keeps one `TestClient` context (and so one event loop) open across requests, so background generations survive between requests. To check streamed chunks, hold the reply with `FakeBackend.released = False` and use `concurrently()`.
+In tests, the `client` fixture keeps one `TestClient` context (and so one event loop) open across requests, so background generations survive between requests. To check streamed chunks, hold the reply with `FakeBackend.released = False` and use `concurrently()`; to pause it partway, set `FakeBackend.stall_after` and later reset it to `None`. `events()` parses a stream body.
 
 Edit, regenerate and switch return the whole `#thread` (`partials/thread.html`), because everything below the changed message can change. Sending returns only the new turn (`partials/turn.html`), plus an out-of-band swap of the sidebar so the title updates.
 
-Jinja is configured with `trim_blocks` and `lstrip_blocks`. The `.content` and `.thinking-content` divs must keep their `{{ … }}` on one line, because CSS uses `white-space: pre-wrap` (there is no Markdown rendering).
+Jinja is configured with `trim_blocks` and `lstrip_blocks`. User messages and thinking are plain text: their `.content` and `.thinking-content` divs must keep their `{{ … }}` on one line, because CSS uses `white-space: pre-wrap` for them.
+
+### Markdown (`markdown.py`)
+
+Only assistant replies are rendered as Markdown, both on the server: by the `markdown` Jinja filter (`.content.markdown`) and in each streamed `content` event. `render_markdown` uses markdown-it-py (CommonMark plus tables and strikethrough, `breaks=True`):
+- `html=False` escapes raw HTML in a reply, and markdown-it drops `javascript:`-style links. The output is inserted as HTML (and processed by htmx), so keep both.
+- Images are disabled, so a reply can't make the browser load from arbitrary URLs. Links open in a new tab.
+- Code blocks are wrapped in `.code-block` with a header showing the language and a Copy button. `app.js` handles Copy, with an `execCommand` fallback, since `navigator.clipboard` doesn't exist over plain HTTP on the LAN.
 
 ### Images
 

@@ -47,7 +47,8 @@ class FakeBackend:
         self.fail = fail
         # Set to False to hold replies in the "streaming" state until set back to True.
         self.released = True
-        # After this many chunks, hang like a model still generating; only a stop ends it.
+        # After this many chunks, hang like a model still generating, until stopped or
+        # set back to None.
         self.stall_after: int | None = None
         self.stream_closed = False
         self.calls: list[tuple[str, list[ChatCompletionMessageParam], str]] = []
@@ -87,8 +88,8 @@ class FakeBackend:
             while not self.released:
                 await asyncio.sleep(0.005)
             for count, chunk in enumerate(self.chunks):
-                if count == self.stall_after:
-                    await asyncio.Event().wait()
+                while count == self.stall_after:
+                    await asyncio.sleep(0.005)
                 yield chunk
         finally:
             self.stream_closed = True
@@ -121,6 +122,17 @@ def conversation(client: TestClient, store: Store) -> Conversation:
 def stream(client: TestClient, conversation: Conversation, message_id: str) -> str:
     """Wait for a reply to finish and return its SSE stream."""
     return client.get(f"/c/{conversation.id}/stream/{message_id}").text
+
+
+def events(body: str) -> list[tuple[str, str]]:
+    """Parse an SSE stream into (event, data) pairs, joining data lines like a browser."""
+    parsed = []
+    for block in body.strip("\n").split("\n\n"):
+        lines = block.split("\n")
+        assert lines[0].startswith("event: ")
+        data = "\n".join(line.removeprefix("data: ") for line in lines[1:])
+        parsed.append((lines[0].removeprefix("event: "), data))
+    return parsed
 
 
 def wait_until(condition: Callable[[], bool]) -> None:
@@ -198,10 +210,12 @@ def test_send_and_stream(
     reply = conversation.active_path()[1]
     [body] = concurrently(backend, lambda: stream(client, conversation, reply.id))
 
-    assert "event: content\ndata: , &lt;world&gt;" in body
-    # A newline inside a chunk becomes two data lines, which the browser joins with "\n".
-    assert "data: !\ndata: Bye" in body
-    assert "event: done" in body
+    # The chunks arrive faster than the render interval, so they come as one event,
+    # rendered as Markdown with raw HTML escaped.
+    (kind, html), (last, _) = events(body)
+    assert kind == "content"
+    assert html == "<p>Hello, &lt;world&gt;!<br />\nBye</p>\n"
+    assert last == "done"
     assert reply.content == "Hello, <world>!\nBye"
     assert reply.status == "done"
     assert backend.calls == [
@@ -322,11 +336,50 @@ def test_reconnecting_clients_follow_the_same_generation(
     bodies = concurrently(backend, follow, follow)
 
     for body in bodies:
-        # Each client gets every chunk, then `done` with the finished message,
+        # Each client gets the whole reply, then `done` with the finished message,
         # not a busy one that would reconnect again.
-        assert body.count("event: content") == 3
-        assert 'class="msg assistant done"' in body.split("event: done", 1)[1]
+        (kind, html), (last, done) = events(body)
+        assert kind == "content"
+        assert "Hello, &lt;world&gt;!<br />\nBye" in html
+        assert last == "done"
+        assert 'class="msg assistant done"' in done
     assert len(backend.calls) == 1
+
+
+def test_each_content_event_is_the_whole_reply_so_far(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.chunks = [("content", "**Hel"), ("content", "lo**")]
+    backend.stall_after = 1
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    reply = conversation.active_path()[1]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        following = pool.submit(stream, client, conversation, reply.id)
+        wait_until(lambda: reply.content == "**Hel")
+        time.sleep(0.2)  # let the follower send the first part
+        backend.stall_after = None
+        body = following.result(timeout=5)
+
+    # The second event replaces the first: `**` only becomes bold once it is closed.
+    assert events(body)[:2] == [
+        ("content", "<p>**Hel</p>\n"),
+        ("content", "<p><strong>Hello</strong></p>\n"),
+    ]
+
+
+def test_only_replies_are_rendered_as_markdown(
+    client: TestClient, conversation: Conversation, backend: FakeBackend
+) -> None:
+    backend.chunks = [("thinking", "*plan*"), ("content", "# Title\n\n```py\nx = 1\n```")]
+    client.post(f"/c/{conversation.id}/messages", data={"content": "**as typed**"})
+    stream(client, conversation, conversation.active_path()[1].id)
+    page = client.get(f"/c/{conversation.id}").text
+
+    assert '<div class="content">**as typed**</div>' in page
+    assert '<div class="thinking-content">*plan*</div>' in page
+    assert '<div class="content markdown"><h1>Title</h1>' in page
+    assert '<span class="code-language">py</span>' in page
+    assert '<button class="copy-code" type="button">Copy</button>' in page
 
 
 def test_generation_finishes_without_a_client(
