@@ -17,7 +17,8 @@
       <summary>Thinking…</summary>
       <div class="thinking-content" sse-swap="thinking" hx-swap="beforeend"></div>
     </details>
-    <div class="content" sse-swap="content" hx-swap="beforeend"></div>
+    {# Each `content` event is the whole reply so far, rendered as Markdown. #}
+    <div class="content markdown" sse-swap="content" hx-swap="innerHTML"></div>
     {% else %}
     {% if message.images %}
     <div class="images">
@@ -33,7 +34,11 @@
       <div class="thinking-content">{{ message.thinking }}</div>
     </details>
     {% endif %}
+    {% if message.role == "assistant" %}
+    <div class="content markdown">{{ message.content | markdown }}</div>
+    {% else %}
     <div class="content">{{ message.content }}</div>
+    {% endif %}
     {% endif %}
     {% if message.status == "error" %}<p class="error">{{ message.error }}</p>{% endif %}
   </div>
