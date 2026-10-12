@@ -8,7 +8,7 @@ keep receiving chunks until the reply finishes.
 import asyncio
 import base64
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, suppress
 
 from openai import OpenAIError
 from openai.types.chat import ChatCompletionContentPartParam, ChatCompletionMessageParam
@@ -21,6 +21,7 @@ class Generation:
     def __init__(self) -> None:
         self.chunks: list[tuple[ChunkKind, str]] = []
         self.finished = False
+        self._finished = asyncio.Event()
         self._changed = asyncio.Event()
         self.task: asyncio.Task[None] | None = None
 
@@ -30,7 +31,14 @@ class Generation:
 
     def finish(self) -> None:
         self.finished = True
+        self._finished.set()
         self._notify()
+
+    async def wait_finished(self, timeout: float) -> None:
+        """Wait until the reply finishes, or at most `timeout` seconds."""
+        with suppress(TimeoutError):
+            async with asyncio.timeout(timeout):
+                await self._finished.wait()
 
     def _notify(self) -> None:
         # Wake everyone waiting on the current event, then start a fresh one.

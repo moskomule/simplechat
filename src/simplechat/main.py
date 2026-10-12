@@ -1,7 +1,6 @@
 """A ChatGPT-style chat UI for Ollama."""
 
 import argparse
-import asyncio
 import socket
 from collections.abc import AsyncIterator
 from html import escape
@@ -38,8 +37,12 @@ MAX_IMAGES = 10
 MAX_IMAGE_BYTES = 20 * 2**20
 # Images live in memory until their chat is deleted, so cap the total.
 MAX_STORED_IMAGE_BYTES = 2**30
-# A streaming reply is re-rendered as Markdown at most this often, in seconds.
+# A streaming reply is re-rendered as Markdown at most every RENDER_INTERVAL seconds,
+# and less often as it grows: at most RENDER_BUDGET characters per second for each
+# follower. Rendering takes about 1 ms per KB, so that caps the CPU time and bytes
+# a long reply costs per second instead of letting them grow with its length.
 RENDER_INTERVAL = 0.1
+RENDER_BUDGET = 100_000
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.trim_blocks = True
 templates.env.lstrip_blocks = True
@@ -127,6 +130,11 @@ async def read_images(uploads: list[UploadFile]) -> list[Image]:
             raise HTTPException(413, f"Images must be {MAX_IMAGE_BYTES // 2**20} MB or smaller")
         images.append(Image(data=await upload.read(), media_type=upload.content_type))
     return images
+
+
+def render_delay(content: str) -> float:
+    """Seconds to wait before rendering a streaming reply again (see RENDER_BUDGET)."""
+    return max(RENDER_INTERVAL, len(content) / RENDER_BUDGET)
 
 
 def describe_models(models: list[LoadedModel]) -> str:
@@ -439,9 +447,9 @@ async def stream_reply(
             if new_content := "".join(text for kind, text in chunks if kind == "content"):
                 content += new_content
                 yield ServerSentEvent(event="content", raw_data=render_markdown(content))
-            # Re-rendering on every token would cost CPU and bandwidth that grow
-            # with the reply; chunks that arrive meanwhile come as one batch.
-            await asyncio.sleep(RENDER_INTERVAL)
+            # Chunks that arrive meanwhile come as one batch. A finished reply
+            # ends the wait, so `done` is not held back.
+            await generation.wait_finished(render_delay(content))
     html = templates.get_template("partials/message.html").render(
         conversation=conversation, message=message
     )

@@ -204,13 +204,18 @@ document.body.addEventListener("click", (event) => {
   const button = event.target.closest(".copy-code");
   if (!button) return;
   const code = button.closest(".code-block").querySelector("code").textContent;
-  copyText(code).then(
-    () => (button.textContent = "Copied"),
-    () => (button.textContent = "Copy failed"),
-  );
-  setTimeout(() => {
-    button.textContent = "Copy";
-  }, 2000);
+  copyText(code)
+    .then(
+      () => (button.textContent = "Copied"),
+      () => (button.textContent = "Copy failed"),
+    )
+    // Only once the result shows: writeText can wait on a permission prompt.
+    .then(() => {
+      clearTimeout(button.resetTimer);
+      button.resetTimer = setTimeout(() => {
+        button.textContent = "Copy";
+      }, 2000);
+    });
 });
 
 // --- no new requests while a reply is being generated ---

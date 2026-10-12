@@ -20,7 +20,7 @@ from simplechat.llm import (
     UnloadError,
     UnloadResult,
 )
-from simplechat.main import create_app
+from simplechat.main import RENDER_BUDGET, RENDER_INTERVAL, create_app, render_delay
 from simplechat.store import Conversation, Image, Store
 
 SETTINGS = Settings(
@@ -365,6 +365,29 @@ def test_each_content_event_is_the_whole_reply_so_far(
         ("content", "<p>**Hel</p>\n"),
         ("content", "<p><strong>Hello</strong></p>\n"),
     ]
+
+
+def test_render_delay_grows_with_the_reply() -> None:
+    assert render_delay("short") == RENDER_INTERVAL
+    # Long replies are rendered less often, so the work per second stays bounded.
+    assert render_delay("x" * 50_000) == 50_000 / RENDER_BUDGET > RENDER_INTERVAL
+
+
+def test_done_is_not_held_back_by_the_render_delay(
+    client: TestClient,
+    conversation: Conversation,
+    backend: FakeBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("simplechat.main.RENDER_INTERVAL", 30)
+    backend.released = False
+    client.post(f"/c/{conversation.id}/messages", data={"content": "Hi"})
+    reply = conversation.active_path()[1]
+    start = time.monotonic()
+    [body] = concurrently(backend, lambda: stream(client, conversation, reply.id))
+    # The follower waits between renders, but the finished reply ends the wait.
+    assert time.monotonic() - start < 5
+    assert events(body)[-1][0] == "done"
 
 
 def test_only_replies_are_rendered_as_markdown(
