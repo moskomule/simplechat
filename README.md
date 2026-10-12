@@ -13,7 +13,7 @@ One `uv run`, then chat from your laptop, or from your phone on the same Wi-Fi.
 [![Ollama](https://img.shields.io/badge/Ollama-local%20LLMs-000000?logo=ollama&logoColor=white)](https://ollama.com/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-<img src="docs/images/streaming.gif" alt="Asking a question: the model's thinking streams in, then its answer" width="800">
+<img src="docs/images/streaming.gif" alt="Asking a question: the model's thinking streams in, then its answer, formatted as Markdown (a table) as it arrives" width="800">
 
 </div>
 
